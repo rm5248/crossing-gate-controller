@@ -48,6 +48,8 @@ struct TrackInformation{
   int right_input;
   enum TrackState current_state;
   enum Direction current_direction;
+  // When the train came in, so we can timeout
+  unsigned long incoming_millis;
 };
 
 enum GateFlashState{
@@ -58,6 +60,7 @@ enum GateFlashState{
 struct TrackInformation track1;
 struct TrackInformation track2;
 enum GateFlashState gate_flash;
+unsigned long timeout_millis = 25000;
 
 /**
  * This is a callback function that is called by liblcc in order to write a frame out to the CAN bus.
@@ -166,17 +169,20 @@ void handle_track(struct TrackInformation* track){
   int left_island_input = !digitalRead(track->left_island_input);
   int right_island_input = !digitalRead(track->right_island_input);
   int right_input = !digitalRead(track->right_input);
+  unsigned long millis_diff = millis() - track->incoming_millis;
 
   if(left_input == 1 && track->current_state == TRACK_UNOCCUPIED){
     // Incoming train, left to right
     track->current_state = PRE_ISLAND_OCCUPIED;
     track->current_direction = DIRECTION_LTR;
+    track->incoming_millis = millis();
     Serial.println(F("Incoming train LTR"));
     return;
   }else if(right_input == 1 && track->current_state == TRACK_UNOCCUPIED){
     // Incoming train, right to left
     track->current_state = PRE_ISLAND_OCCUPIED;
     track->current_direction = DIRECTION_RTL;
+    track->incoming_millis = millis();
     Serial.println(F("Incoming train RTL"));
     return;
   }
@@ -185,6 +191,12 @@ void handle_track(struct TrackInformation* track){
     handle_ltr(track, left_input, left_island_input, right_island_input, right_input);
   }else if(track->current_direction == DIRECTION_RTL){
     handle_rtl(track, left_input, left_island_input, right_island_input, right_input);
+  }
+
+  if(millis_diff > timeout_millis &&
+    track->current_state != TRACK_UNOCCUPIED){
+    track->current_state = TRACK_UNOCCUPIED;
+    track->current_direction = DIRECTION_UNKNOWN;
   }
 }
 
