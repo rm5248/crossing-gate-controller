@@ -4,6 +4,8 @@
 #include <lcc-datagram.h>
 #include <lcc-event.h>
 
+#include "crossing-gate-structs.h"
+
 static const byte MCP2515_CS  = 10 ; // CS input of MCP2515 (adapt to your design) 
 static const byte MCP2515_INT =  2 ; // INT output of MCP2515 (adapt to your design)
 
@@ -20,47 +22,15 @@ CANMessage frame ;
 struct lcc_can_frame lcc_frame;
 unsigned long claim_alias_time;
 static uint32_t gBlinkLedDate = 0 ;
-int inputValue = 0;
-
-enum TrackState{
-  TRACK_UNOCCUPIED,
-  PRE_ISLAND_OCCUPIED,
-  ISLAND_OCCUPIED_INCOMING,
-  ISLAND_OCCUPIED,
-  POST_ISLAND_OCCUPIED_INCOMING,
-  POST_ISLAND_OCCUPIED,
-};
-
-enum Direction{
-  DIRECTION_UNKNOWN,
-  DIRECTION_LTR,
-  DIRECTION_RTL,
-};
-
-struct TrackInformation{
-  // The furthest left input going into the crossing
-  int left_input;
-  // The input on the left side of the island
-  int left_island_input;
-  // The input on the right side of the island
-  int right_island_input;
-  // The furthest right input going into the crossing
-  int right_input;
-  enum TrackState current_state;
-  enum Direction current_direction;
-  // When the train came in, so we can timeout
-  unsigned long incoming_millis;
-};
 
 enum GateFlashState{
   FLASH_OFF,
   FLASH_ON,
 };
 
-struct TrackInformation track1;
-struct TrackInformation track2;
 enum GateFlashState gate_flash;
 unsigned long timeout_millis = 25000;
+struct route crossing_routes[2];
 
 /**
  * This is a callback function that is called by liblcc in order to write a frame out to the CAN bus.
@@ -78,17 +48,17 @@ void lcc_write(struct lcc_context*, struct lcc_can_frame* lcc_frame){
 }
 
 /**
- * Determine if a track is occupied for a flash state.
- * The track is occupied if:
+ * Determine if a route is occupied for a flash state.
+ * The route is occupied if:
  *  - The pre-island is occupied
  *  - the island is occupied
  *
  * Once the train passes the island, it is no longer considered occupied for flashing purposes
  */
-int is_track_occupied_for_flash(struct TrackInformation* track){
-  if(track->current_state == PRE_ISLAND_OCCUPIED ||
-    track->current_state == ISLAND_OCCUPIED_INCOMING ||
-    track->current_state == ISLAND_OCCUPIED){
+int is_route_occupied_for_flash(struct route* route){
+  if(route->current_train.location == LOCATION_PRE_ISLAND_OCCUPIED ||
+    route->current_train.location == LOCATION_ISLAND_OCCUPIED_INCOMING ||
+    route->current_train.location == LOCATION_ISLAND_OCCUPIED){
     return 1;
   }
 
@@ -98,9 +68,10 @@ int is_track_occupied_for_flash(struct TrackInformation* track){
 void handle_gate_flash(){
   enum GateFlashState expectedGateFlashState = FLASH_OFF;
 
-  if(is_track_occupied_for_flash(&track1) ||
-    is_track_occupied_for_flash(&track2)){
+  for(int x = 0; x < sizeof(crossing_routes) / sizeof(crossing_routes[0]); x++){
+    if(is_route_occupied_for_flash(&crossing_routes[x])){
       expectedGateFlashState = FLASH_ON;
+    }
   }
 
   if(expectedGateFlashState != gate_flash){
@@ -114,107 +85,149 @@ void handle_gate_flash(){
   }
 }
 
-void handle_ltr(struct TrackInformation* track, int left_input, int left_island_input, int right_island_input, int right_input){
+void handle_route_ltr(struct route* route, int left_input, int left_island_input, int right_island_input, int right_input){
   if(left_island_input == 1 && 
-    track->current_state == PRE_ISLAND_OCCUPIED){
-    track->current_state = ISLAND_OCCUPIED_INCOMING;
+    route->current_train.location == LOCATION_PRE_ISLAND_OCCUPIED){
+    route->current_train.location = LOCATION_ISLAND_OCCUPIED_INCOMING;
     Serial.println(F("Island occupied incoming"));
   }else if(right_island_input == 1 &&
-    track->current_state == ISLAND_OCCUPIED_INCOMING){
-    track->current_state = ISLAND_OCCUPIED;
+    route->current_train.location == LOCATION_ISLAND_OCCUPIED_INCOMING){
+    route->current_train.location = LOCATION_ISLAND_OCCUPIED;
     Serial.println(F("island occupied"));
   }else if(right_island_input == 0 &&
-    track->current_state == ISLAND_OCCUPIED){
-    track->current_state = POST_ISLAND_OCCUPIED_INCOMING;
+    route->current_train.location == LOCATION_ISLAND_OCCUPIED){
+    route->current_train.location = LOCATION_POST_ISLAND_OCCUPIED_INCOMING;
     Serial.println(F("post island occupied incoming"));
   }else if(right_input == 1 &&
-    track->current_state == POST_ISLAND_OCCUPIED_INCOMING){
-    track->current_state = POST_ISLAND_OCCUPIED;
+    route->current_train.location == LOCATION_POST_ISLAND_OCCUPIED_INCOMING){
+    route->current_train.location = LOCATION_POST_ISLAND_OCCUPIED;
     Serial.println(F("post island occupied"));
   }else if(right_input == 0 &&
-    track->current_state == POST_ISLAND_OCCUPIED){
+    route->current_train.location == LOCATION_POST_ISLAND_OCCUPIED){
     Serial.println(F("train out LTR"));
-    track->current_state = TRACK_UNOCCUPIED;
-    track->current_direction = DIRECTION_UNKNOWN;
+    route->current_train.location = LOCATION_UNOCCUPIED;
+    route->current_train.direction = DIRECTION_UNKNOWN;
   }
 }
 
-void handle_rtl(struct TrackInformation* track, int left_input, int left_island_input, int right_island_input, int right_input){
+void handle_route_rtl(struct route* route, int left_input, int left_island_input, int right_island_input, int right_input){
   if(right_island_input == 1 && 
-    track->current_state == PRE_ISLAND_OCCUPIED){
-    track->current_state = ISLAND_OCCUPIED_INCOMING;
+    route->current_train.location == LOCATION_PRE_ISLAND_OCCUPIED){
+    route->current_train.location = LOCATION_ISLAND_OCCUPIED_INCOMING;
     Serial.println(F("Island occupied incoming"));
   }else if(left_island_input == 1 &&
-    track->current_state == ISLAND_OCCUPIED_INCOMING){
-    track->current_state = ISLAND_OCCUPIED;
+    route->current_train.location == LOCATION_ISLAND_OCCUPIED_INCOMING){
+    route->current_train.location = LOCATION_ISLAND_OCCUPIED;
     Serial.println(F("island occupied"));
   }else if(left_island_input == 0 &&
-    track->current_state == ISLAND_OCCUPIED){
-    track->current_state = POST_ISLAND_OCCUPIED_INCOMING;
+    route->current_train.location == LOCATION_ISLAND_OCCUPIED){
+    route->current_train.location = LOCATION_POST_ISLAND_OCCUPIED_INCOMING;
     Serial.println(F("post island occupied incoming"));
   }else if(left_input == 1 &&
-    track->current_state == POST_ISLAND_OCCUPIED_INCOMING){
-    track->current_state = POST_ISLAND_OCCUPIED;
+    route->current_train.location == LOCATION_POST_ISLAND_OCCUPIED_INCOMING){
+    route->current_train.location = LOCATION_POST_ISLAND_OCCUPIED;
     Serial.println(F("post island occupied"));
   }else if(left_input == 0 &&
-    track->current_state == POST_ISLAND_OCCUPIED){
+    route->current_train.location == LOCATION_POST_ISLAND_OCCUPIED){
     Serial.println(F("train out RTL"));
-    track->current_state = TRACK_UNOCCUPIED;
-    track->current_direction = DIRECTION_UNKNOWN;
+    route->current_train.location = LOCATION_UNOCCUPIED;
+    route->current_train.direction = DIRECTION_UNKNOWN;
   }
 }
 
-void handle_track(struct TrackInformation* track){
-  int left_input = !digitalRead(track->left_input);
-  int left_island_input = !digitalRead(track->left_island_input);
-  int right_island_input = !digitalRead(track->right_island_input);
-  int right_input = !digitalRead(track->right_input);
-  unsigned long millis_diff = millis() - track->incoming_millis;
+void handle_single_route(struct route* route){
+  for(int x = 0; x < 4; x++){
+    if(!sensor_input_valid(&route->inputs[0])){
+      return;
+    }
+  }
 
-  if(left_input == 1 && track->current_state == TRACK_UNOCCUPIED){
-    // Incoming train, left to right
-    track->current_state = PRE_ISLAND_OCCUPIED;
-    track->current_direction = DIRECTION_LTR;
-    track->incoming_millis = millis();
-    Serial.println(F("Incoming train LTR"));
-    return;
-  }else if(right_input == 1 && track->current_state == TRACK_UNOCCUPIED){
-    // Incoming train, right to left
-    track->current_state = PRE_ISLAND_OCCUPIED;
-    track->current_direction = DIRECTION_RTL;
-    track->incoming_millis = millis();
-    Serial.println(F("Incoming train RTL"));
+  int left_input = sensor_input_value(&route->inputs[0]);
+  int left_island_input = sensor_input_value(&route->inputs[1]);
+  int right_island_input = sensor_input_value(&route->inputs[2]);
+  int right_input = sensor_input_value(&route->inputs[3]);
+  unsigned long millis_diff = millis() - route->current_train.incoming_millis;
+
+  // First check to see if this is a new train coming into the route
+  if((left_input || right_input) &&
+    route->current_train.location == LOCATION_UNOCCUPIED){
+      // There is a new train coming into the route.
+      // Let's see if this route is valid or not
+      for(int x = 0; x < sizeof(route->switch_inputs) / sizeof(route->switch_inputs[0]); x++){
+        if(switch_input_value(&route->switch_inputs[x]) != route->switch_inputs[x].route_position){
+          // The switch is not set to the right position for this route to be active
+          return;
+        }
+      }
+
+      // All switches are in the correct position for this route.
+      // This route now has a train in it
+      route->current_train.incoming_millis = millis();
+      route->current_train.location = LOCATION_PRE_ISLAND_OCCUPIED;
+      if(left_input){
+        route->current_train.direction = DIRECTION_LTR;
+        Serial.println(F("Incoming train LTR"));
+      }else{
+        route->current_train.direction = DIRECTION_RTL;
+        Serial.println(F("Incoming train RTL"));
+      }
+
     return;
   }
 
-  if(track->current_direction == DIRECTION_LTR){
-    handle_ltr(track, left_input, left_island_input, right_island_input, right_input);
-  }else if(track->current_direction == DIRECTION_RTL){
-    handle_rtl(track, left_input, left_island_input, right_island_input, right_input);
+  if(route->current_train.direction == DIRECTION_RTL){
+    handle_route_rtl(route, left_input, left_island_input, right_island_input, right_input);
+  }else if(route->current_train.direction == DIRECTION_LTR){
+    handle_route_ltr(route, left_input, left_island_input, right_island_input, right_input);
   }
 
   if(millis_diff > timeout_millis &&
-    track->current_state != TRACK_UNOCCUPIED){
-    track->current_state = TRACK_UNOCCUPIED;
-    track->current_direction = DIRECTION_UNKNOWN;
+    route->current_train.location != LOCATION_UNOCCUPIED){
+      Serial.println("timeout");
+    route->current_train.location = LOCATION_UNOCCUPIED;
+    route->current_train.direction = DIRECTION_UNKNOWN;
   }
 }
 
+static void load_routes(){
+  // TODO load from flash
+  memset(crossing_routes, 0, sizeof(crossing_routes));
+
+  crossing_routes[0].inputs[0].gpio = A4;
+  crossing_routes[0].inputs[0].polarity = POLARITY_ACTIVE_LOW;
+  crossing_routes[0].inputs[1].gpio = A3;
+  crossing_routes[0].inputs[1].polarity = POLARITY_ACTIVE_LOW;
+  crossing_routes[0].inputs[2].gpio = A2;
+  crossing_routes[0].inputs[2].polarity = POLARITY_ACTIVE_LOW;
+  crossing_routes[0].inputs[3].gpio = A1;
+  crossing_routes[0].inputs[3].polarity = POLARITY_ACTIVE_LOW;
+
+  crossing_routes[1].inputs[0].gpio = A5;
+  crossing_routes[1].inputs[0].polarity = POLARITY_ACTIVE_LOW;
+  crossing_routes[1].inputs[1].gpio = A3;
+  crossing_routes[1].inputs[1].polarity = POLARITY_ACTIVE_LOW;
+  crossing_routes[1].inputs[2].gpio = A2;
+  crossing_routes[1].inputs[2].polarity = POLARITY_ACTIVE_LOW;
+  crossing_routes[1].inputs[3].gpio = A0;
+  crossing_routes[1].inputs[3].polarity = POLARITY_ACTIVE_LOW;
+}
+
 void setup () {
-  track1.left_input = A4;
-  track1.left_island_input = A3;
-  track1.right_island_input = A2;
-  track1.right_input = A1;
-  track1.current_state = TRACK_UNOCCUPIED;
-  track1.current_direction = DIRECTION_UNKNOWN;
+  // track1.left_input = A4;
+  // track1.left_island_input = A3;
+  // track1.right_island_input = A2;
+  // track1.right_input = A1;
+  // track1.current_state = TRACK_UNOCCUPIED;
+  // track1.current_direction = DIRECTION_UNKNOWN;
 
-  track2.left_input = A5;
-  track2.left_island_input = A3;
-  track2.right_island_input = A2;
-  track2.right_input = A0;
-  track2.current_state = TRACK_UNOCCUPIED;
-  track2.current_direction = DIRECTION_UNKNOWN;
+  // track2.left_input = A5;
+  // track2.left_island_input = A3;
+  // track2.right_island_input = A2;
+  // track2.right_input = A0;
+  // track2.current_state = TRACK_UNOCCUPIED;
+  // track2.current_direction = DIRECTION_UNKNOWN;
 
+  load_routes();
   gate_flash = FLASH_OFF;
 
   // Define a unique ID for your node.  The generation of this unique ID can be
@@ -347,7 +360,9 @@ void loop() {
   //   // Light up LED with current status
   //   digitalWrite(7, currentVal);
   // }
-  handle_track(&track1);
-  handle_track(&track2);
+
+  for(int x = 0; x < sizeof(crossing_routes) / sizeof(crossing_routes[0]); x++){
+    handle_single_route(&crossing_routes[x]);
+  }
   handle_gate_flash();
 }
