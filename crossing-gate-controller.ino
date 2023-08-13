@@ -3,11 +3,36 @@
 #include <lcc-common-internal.h>
 #include <lcc-datagram.h>
 #include <lcc-event.h>
+#include <lcc-memory.h>
 
 #include "crossing-gate-structs.h"
 
 // STM32
 // #include "stm32f401xe.h"
+
+const char cdi[] PROGMEM = { "<?xml version=\"1.0\"?>\
+<cdi\
+    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"http://openlcb.org/schema/cdi/1/1/cdi.xsd\">\
+    <identification>\
+        <manufacturer>Snowball Creek</manufacturer>\
+        <model>Crossing Gate Controller</model>\
+        <hardwareVersion>1.0</hardwareVersion>\
+        <softwareVersion>0.1</softwareVersion>\
+    </identification>\
+    <acdi/>\
+        <segment space='251'>\
+            <name>Node ID</name>\
+            <group>\
+                <name>Your name and description for this node</name>\
+                <string size='63'>\
+                    <name>Node Name</name>\
+                </string>\
+                <string size='64' offset='1'>\
+                    <name>Node Description</name>\
+                </string>\
+            </group>\
+        </segment>\
+</cdi>" };
 
 static const byte MCP2515_CS  = 9 ; // CS input of MCP2515 (adapt to your design) 
 static const byte MCP2515_INT =  2 ; // INT output of MCP2515 (adapt to your design)
@@ -281,6 +306,10 @@ void setup () {
   // All contexts are owned by the parent lcc_context and are not free'd by the caller
   // lcc_datagram_context_new(ctx);
   struct lcc_event_context* evt_ctx = lcc_event_new(ctx);
+  lcc_datagram_context_new(ctx);
+  struct lcc_memory_context* mem_ctx = lcc_memory_new(ctx);
+
+  lcc_memory_set_cdi(mem_ctx, cdi, sizeof(cdi), LCC_MEMORY_CDI_FLAG_ARDUINO_PROGMEM);
 
   uint64_t event_id = unique_id << 16;
   lcc_event_add_event_produced(evt_ctx, event_id);
