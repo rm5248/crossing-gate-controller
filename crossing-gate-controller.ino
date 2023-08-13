@@ -6,7 +6,10 @@
 
 #include "crossing-gate-structs.h"
 
-static const byte MCP2515_CS  = 10 ; // CS input of MCP2515 (adapt to your design) 
+// STM32
+// #include "stm32f401xe.h"
+
+static const byte MCP2515_CS  = 9 ; // CS input of MCP2515 (adapt to your design) 
 static const byte MCP2515_INT =  2 ; // INT output of MCP2515 (adapt to your design)
 
 // The CAN controller.  This example uses the ACAN2515 library from Pierre Molinaro:
@@ -31,6 +34,19 @@ enum GateFlashState{
 enum GateFlashState gate_flash;
 unsigned long timeout_millis = 25000;
 struct route crossing_routes[2];
+int blink_val = 0;
+
+void display_freeram() {
+  Serial.print(F("- SRAM left: "));
+  Serial.println(freeRam());
+}
+
+int freeRam() {
+  extern int __heap_start,*__brkval;
+  int v;
+  return (int)&v - (__brkval == 0  
+    ? (int)&__heap_start : (int) __brkval);  
+}
 
 /**
  * This is a callback function that is called by liblcc in order to write a frame out to the CAN bus.
@@ -78,9 +94,9 @@ void handle_gate_flash(){
     gate_flash = expectedGateFlashState;
 
     if(gate_flash == FLASH_ON){
-      digitalWrite(8, 1);
+      digitalWrite(5, 1);
     }else{
-      digitalWrite(8, 0);
+      digitalWrite(5, 0);
     }
   }
 }
@@ -183,7 +199,7 @@ void handle_single_route(struct route* route){
 
   if(millis_diff > timeout_millis &&
     route->current_train.location != LOCATION_UNOCCUPIED){
-      Serial.println("timeout");
+    Serial.println(F("timeout"));
     route->current_train.location = LOCATION_UNOCCUPIED;
     route->current_train.direction = DIRECTION_UNKNOWN;
   }
@@ -213,6 +229,13 @@ static void load_routes(){
 }
 
 void setup () {
+  Serial.begin (9600) ;
+  while (!Serial) {
+    delay (50) ;
+    digitalWrite (LED_BUILTIN, !digitalRead (LED_BUILTIN)) ;
+  }
+
+  display_freeram();
   // track1.left_input = A4;
   // track1.left_island_input = A3;
   // track1.right_island_input = A2;
@@ -245,10 +268,10 @@ void setup () {
 
   // Set simple node information that is handled by the 'simple node information protocol'
   lcc_context_set_simple_node_information(ctx,
-                                        "Manufacturer",
-                                        "Model",
-                                        "HWVersion",
-                                        "SWVersion");
+                                        "Snowball Creek",
+                                        "Crossing gate CTL",
+                                        "1.0",
+                                        "0.1");
 
   // Optional: create other contexts to handle other parts of LCC communication
   // Contexts:
@@ -256,7 +279,7 @@ void setup () {
   // * Event - event producer/consumer
   // * Memory -  memory read/writing on the node.  Requires a datagram context to exist
   // All contexts are owned by the parent lcc_context and are not free'd by the caller
-  lcc_datagram_context_new(ctx);
+  // lcc_datagram_context_new(ctx);
   struct lcc_event_context* evt_ctx = lcc_event_new(ctx);
 
   uint64_t event_id = unique_id << 16;
@@ -268,14 +291,12 @@ void setup () {
   pinMode (LED_BUILTIN, OUTPUT) ;
   digitalWrite (LED_BUILTIN, HIGH) ;
 
-  // This particular code uses the SparkFun CAN-BUS shield, where pins 7 and 8
-  // are LED outputs.
   // Pin 4 is used as a sample digital input that will generate LCC events when it
   // changes state.  Make sure to put a pull-down on this pin, and you can then trigger
   // events by connecting and disconnecting it from the +5v rail.
   pinMode(4, INPUT);
-  pinMode(7, OUTPUT);
-  pinMode(8, OUTPUT);
+  pinMode(5, OUTPUT);
+  pinMode(6, OUTPUT);
 
   // Input sensors for the track
   pinMode(A0, INPUT);
@@ -285,14 +306,9 @@ void setup () {
   pinMode(A4, INPUT);
   pinMode(A5, INPUT);
 
-  Serial.begin (9600) ;
-  while (!Serial) {
-    delay (50) ;
-    digitalWrite (LED_BUILTIN, !digitalRead (LED_BUILTIN)) ;
-  }
-
   SPI.begin () ;
-  Serial.println ("Configure ACAN2515") ;
+  display_freeram();
+  Serial.println (F("Configure ACAN2515")) ;
   ACAN2515Settings settings (QUARTZ_FREQUENCY, 125UL * 1000UL) ; // CAN bit rate 125 kb/s
   settings.mRequestedMode = ACAN2515Settings::NormalMode;
   // We need to lower the transmit and receive buffer size(at least on the Uno), as otherwise
@@ -315,6 +331,8 @@ void setup () {
   }
   
   claim_alias_time = millis() + 220;
+
+  display_freeram();
 }
 
 void loop() {
@@ -329,7 +347,10 @@ void loop() {
 
   if (gBlinkLedDate < millis ()) {
     gBlinkLedDate += 1000 ;
-    digitalWrite (LED_BUILTIN, !digitalRead (LED_BUILTIN)) ;
+    digitalWrite (LED_BUILTIN, blink_val) ;
+    blink_val = !blink_val;
+    Serial.print(F("blink: "));
+    Serial.println(millis());
   }
 
   if(millis() >= claim_alias_time &&
