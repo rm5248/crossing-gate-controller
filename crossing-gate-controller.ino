@@ -36,6 +36,16 @@ const char cdi[] PROGMEM = { "<?xml version=\"1.0\"?>\
 
 static const byte MCP2515_CS  = 9 ; // CS input of MCP2515 (adapt to your design) 
 static const byte MCP2515_INT =  2 ; // INT output of MCP2515 (adapt to your design)
+static const byte EEPROM_CS = 10;
+
+static const byte EEPROM_WRITE_ENABLE = 0x6;
+static const byte EEPROM_READ_STATUS_REGISTER = 0x5;
+static const byte EEPROM_WRITE_STATUS_REGISTER = 0x1;
+static const byte EEPROM_READ_MEMORY_ARRAY = 0x3;
+static const byte EEPROM_WRITE_MEMORY_ARRAY = 0x2;
+static const byte EEPROM_WRITE_DISABLE = 0x4;
+
+static const int LCC_UNIQUE_ID_ADDR = 0x6000;
 
 // The CAN controller.  This example uses the ACAN2515 library from Pierre Molinaro:
 // https://github.com/pierremolinaro/acan2515
@@ -60,6 +70,46 @@ enum GateFlashState gate_flash;
 unsigned long timeout_millis = 25000;
 struct route crossing_routes[2];
 int blink_val = 0;
+
+void eeprom_read(int offset, void* data, int numBytes){
+  digitalWrite(EEPROM_CS, LOW);
+  SPI.transfer(EEPROM_READ_MEMORY_ARRAY);
+
+  SPI.transfer((offset & 0xFF00) >> 8);
+  SPI.transfer((offset & 0x00FF) >> 0);
+
+  uint8_t* u8_data = data;
+  while(numBytes > 0){
+    numBytes--;
+    *u8_data = SPI.transfer(0xFF); // dummy byte
+    u8_data++;
+  }
+  Serial.println();
+
+  digitalWrite(EEPROM_CS, HIGH);
+}
+
+void eeprom_write(int offset, void* data, int numBytes){
+  digitalWrite(EEPROM_CS, LOW);
+  SPI.transfer(EEPROM_WRITE_ENABLE);
+  digitalWrite(EEPROM_CS, HIGH);
+
+  delay(5);
+
+  digitalWrite(EEPROM_CS, LOW);
+  SPI.transfer(EEPROM_WRITE_MEMORY_ARRAY);
+  SPI.transfer((offset & 0xFF00) >> 8);
+  SPI.transfer((offset & 0x00FF) >> 0);
+
+  uint8_t* u8_data = data;
+  while(numBytes > 0){
+    numBytes--;
+    SPI.transfer(*u8_data); // data byte
+    u8_data++;
+  }
+
+  digitalWrite(EEPROM_CS, HIGH);
+}
 
 void display_freeram() {
   Serial.print(F("- SRAM left: "));
@@ -234,7 +284,7 @@ static void load_routes(){
   // TODO load from flash
   memset(crossing_routes, 0, sizeof(crossing_routes));
 
-  crossing_routes[0].inputs[0].gpio = A4;
+  crossing_routes[0].inputs[0].gpio = 2;
   crossing_routes[0].inputs[0].polarity = POLARITY_ACTIVE_LOW;
   crossing_routes[0].inputs[1].gpio = A3;
   crossing_routes[0].inputs[1].polarity = POLARITY_ACTIVE_LOW;
@@ -243,7 +293,7 @@ static void load_routes(){
   crossing_routes[0].inputs[3].gpio = A1;
   crossing_routes[0].inputs[3].polarity = POLARITY_ACTIVE_LOW;
 
-  crossing_routes[1].inputs[0].gpio = A5;
+  crossing_routes[1].inputs[0].gpio = 3;
   crossing_routes[1].inputs[0].polarity = POLARITY_ACTIVE_LOW;
   crossing_routes[1].inputs[1].gpio = A3;
   crossing_routes[1].inputs[1].polarity = POLARITY_ACTIVE_LOW;
@@ -259,6 +309,8 @@ void setup () {
     delay (50) ;
     digitalWrite (LED_BUILTIN, !digitalRead (LED_BUILTIN)) ;
   }
+
+  SPI.begin();
 
   display_freeram();
   // track1.left_input = A4;
@@ -280,7 +332,8 @@ void setup () {
 
   // Define a unique ID for your node.  The generation of this unique ID can be
   // found in the LCC specifications, specifically the unique identifiers standard
-  uint64_t unique_id = 0x040032405022llu;
+  uint64_t unique_id;
+  eeprom_read(LCC_UNIQUE_ID_ADDR, &unique_id, 8);
 
   // Create an LCC context that determines our communications
   ctx = lcc_context_new();
@@ -316,13 +369,9 @@ void setup () {
   lcc_event_add_event_produced(evt_ctx, event_id + 1);
   lcc_event_add_event_produced(evt_ctx, event_id + 2);
 
-
   pinMode (LED_BUILTIN, OUTPUT) ;
   digitalWrite (LED_BUILTIN, HIGH) ;
 
-  // Pin 4 is used as a sample digital input that will generate LCC events when it
-  // changes state.  Make sure to put a pull-down on this pin, and you can then trigger
-  // events by connecting and disconnecting it from the +5v rail.
   pinMode(4, INPUT);
   pinMode(5, OUTPUT);
   pinMode(6, OUTPUT);
@@ -332,8 +381,11 @@ void setup () {
   pinMode(A1, INPUT);
   pinMode(A2, INPUT);
   pinMode(A3, INPUT);
-  pinMode(A4, INPUT);
-  pinMode(A5, INPUT);
+  pinMode(2, INPUT);
+  pinMode(3, INPUT);
+  // pinMode(A4, INPUT);
+  // pinMode(A5, INPUT);
+
 
   SPI.begin () ;
   display_freeram();
@@ -378,8 +430,8 @@ void loop() {
     gBlinkLedDate += 1000 ;
     digitalWrite (LED_BUILTIN, blink_val) ;
     blink_val = !blink_val;
-    Serial.print(F("blink: "));
-    Serial.println(millis());
+    // Serial.print(F("blink: "));
+    // Serial.println(millis());
   }
 
   if(millis() >= claim_alias_time &&
