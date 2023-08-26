@@ -32,6 +32,16 @@ const char cdi[] PROGMEM = { "<?xml version=\"1.0\"?>\
                 </string>\
             </group>\
         </segment>\
+        <segment space='253'>\
+          <name>Routes</name>\
+          <group replication='2'>\
+            <name>Route</name>\
+            <int size='1'>\
+              <name>GPIO Number</name>\
+              <description>GPIO number to use as input to this sensor on this route</description>\
+            </int>\
+          </group>\
+        </segment>\
 </cdi>" };
 
 static const byte MCP2515_CS  = 9 ; // CS input of MCP2515 (adapt to your design) 
