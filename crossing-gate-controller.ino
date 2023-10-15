@@ -10,38 +10,109 @@
 // STM32
 // #include "stm32f401xe.h"
 
-const char cdi[] PROGMEM = { "<?xml version=\"1.0\"?>\
-<cdi\
-    xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:noNamespaceSchemaLocation=\"http://openlcb.org/schema/cdi/1/1/cdi.xsd\">\
-    <identification>\
-        <manufacturer>Snowball Creek</manufacturer>\
-        <model>Crossing Gate Controller</model>\
-        <hardwareVersion>1.0</hardwareVersion>\
-        <softwareVersion>0.1</softwareVersion>\
-    </identification>\
-    <acdi/>\
-        <segment space='251'>\
-            <name>Node ID</name>\
-            <group>\
-                <name>Your name and description for this node</name>\
-                <string size='63'>\
-                    <name>Node Name</name>\
-                </string>\
-                <string size='64' offset='1'>\
-                    <name>Node Description</name>\
-                </string>\
-            </group>\
-        </segment>\
-        <segment space='253'>\
-          <name>Routes</name>\
-          <group replication='2'>\
-            <name>Route</name>\
-            <int size='1'>\
-              <name>GPIO Number</name>\
-              <description>GPIO number to use as input to this sensor on this route</description>\
-            </int>\
-          </group>\
-        </segment>\
+const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
+<cdi xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:noNamespaceSchemaLocation='http://openlcb.org/schema/cdi/1/1/cdi.xsd'> \
+<identification> \
+<manufacturer>Snowball Creek</manufacturer> \
+<model>Crossing Gate Controller</model> \
+<hardwareVersion>1.0</hardwareVersion> \
+<softwareVersion>0.1</softwareVersion> \
+</identification> \
+<acdi/> \
+<segment space='251'> \
+<name>Node ID</name> \
+<group> \
+<name>Your name and description for this node</name> \
+<string size='63'> \
+<name>Node Name</name> \
+</string> \
+<string size='64' offset='1'> \
+<name>Node Description</name> \
+</string> \
+</group> \
+</segment> \
+<segment space='253'> \
+<name>Routes</name> \
+<group replication='8'> \
+<name>Route</name> \
+<repname>Route</repname> \
+<group replication='4'> \
+<name>Sensor Inputs</name> \
+<repname>Sensor Inputs</repname> \
+<int size='1'> \
+<name>GPIO Number</name> \
+<description>GPIO number to use as input to this sensor on this route.  Set to 0 to disable and use EventIDs.</description> \
+</int> \
+<int size='1'> \
+<name>Polarity</name> \
+<description>GPIO polarity</description> \
+<map> \
+<relation> \
+<property>0</property> \
+<value>High</value> \
+</relation> \
+<relation> \
+<property>1</property> \
+<value>Low</value> \
+</relation> \
+</map> \
+</int> \
+<eventid> \
+<name>Event Id ON</name> \
+<description>If not using GPIO, event ID to indicate that this sensor is on</description> \
+</eventid> \
+<eventid> \
+<name>Event Id OFF</name> \
+<description>If not using GPIO, event ID to indicate that this sensor is off</description> \
+</eventid> \
+</group> \
+<!-- Switch inputs --> \
+<group replication='8'> \
+<name>Switch Inputs</name> \
+<repname>Switch Input</repname> \
+<int size='1'> \
+<name>GPIO Number</name> \
+<description>GPIO number to use as input to this sensor on this route.  Set to 0 to disable and use EventIDs.</description> \
+</int> \
+<int size='1'> \
+<name>Polarity</name> \
+<description>GPIO polarity</description> \
+<map> \
+<relation> \
+<property>0</property> \
+<value>High</value> \
+</relation> \
+<relation> \
+<property>1</property> \
+<value>Low</value> \
+</relation> \
+</map> \
+</int> \
+<int size='1'> \
+<name>Route Posistion</name> \
+<description>The posistion this switch needs to be in for this route to be valid</description> \
+<map> \
+<relation> \
+<property>0</property> \
+<value>Normal</value> \
+</relation> \
+<relation> \
+<property>1</property> \
+<value>Reverse</value> \
+</relation> \
+</map> \
+</int> \
+<eventid> \
+<name>Event Id Normal</name> \
+<description>If not using GPIO, event ID to indicate that this switch is normal</description> \
+</eventid> \
+<eventid> \
+<name>Event Id Reverse</name> \
+<description>If not using GPIO, event ID to indicate that this switch is reversed</description> \
+</eventid> \
+</group> \
+</group> \
+</segment> \
 </cdi>" };
 
 static const byte MCP2515_CS  = 9 ; // CS input of MCP2515 (adapt to your design) 
@@ -80,6 +151,36 @@ enum GateFlashState gate_flash;
 unsigned long timeout_millis = 25000;
 struct route crossing_routes[2];
 int blink_val = 0;
+
+int found_eeprom = 0;
+
+void find_eeprom(){
+  Serial.println("Looking for EEPROM");
+
+  digitalWrite(EEPROM_CS, LOW);
+  SPI.transfer(EEPROM_WRITE_ENABLE);
+  digitalWrite(EEPROM_CS, HIGH);
+
+  delay(5);
+
+  digitalWrite(EEPROM_CS, LOW);
+  SPI.transfer(EEPROM_READ_STATUS_REGISTER);
+  int read_status_reg = SPI.transfer(0xFF);
+  digitalWrite(EEPROM_CS, HIGH);
+
+  delay(5);
+
+  if(read_status_reg != 0xFF &&
+     read_status_reg & (0x01 << 1)){
+    // WEL bit is set, so we are talking with the EEPROM!
+    // Let's go and disable it again
+    found_eeprom = 1;
+    digitalWrite(EEPROM_CS, LOW);
+    SPI.transfer(EEPROM_WRITE_DISABLE);
+    digitalWrite(EEPROM_CS, HIGH);
+    Serial.println("Found EEPROM!");
+  }
+}
 
 void eeprom_read(int offset, void* data, int numBytes){
   digitalWrite(EEPROM_CS, LOW);
@@ -136,7 +237,7 @@ int freeRam() {
 /**
  * This is a callback function that is called by liblcc in order to write a frame out to the CAN bus.
  */
-void lcc_write(struct lcc_context*, struct lcc_can_frame* lcc_frame){
+int lcc_write(struct lcc_context*, struct lcc_can_frame* lcc_frame){
   frame.id = lcc_frame->can_id;
   frame.len = lcc_frame->can_len;
   frame.rtr = false;
@@ -145,7 +246,10 @@ void lcc_write(struct lcc_context*, struct lcc_can_frame* lcc_frame){
   if(can.tryToSend (frame)){
     Serial.println(F("Send frame OK"));
     Serial.println(frame.id, HEX);
+    return LCC_OK;
   }
+
+  return LCC_ERROR_TX;
 }
 
 /**
@@ -322,6 +426,8 @@ void setup () {
 
   SPI.begin();
 
+  pinMode(EEPROM_CS, OUTPUT);
+
   display_freeram();
   // track1.left_input = A4;
   // track1.left_island_input = A3;
@@ -344,6 +450,13 @@ void setup () {
   // found in the LCC specifications, specifically the unique identifiers standard
   uint64_t unique_id;
   eeprom_read(LCC_UNIQUE_ID_ADDR, &unique_id, 8);
+
+  Serial.print("ID: ");
+  for(int x = 0; x < 8; x++){
+    uint8_t* as_u8 = (uint8_t*)&unique_id;
+    Serial.print(as_u8[x], HEX);
+  }
+  Serial.println();
 
   // Create an LCC context that determines our communications
   ctx = lcc_context_new();
@@ -418,6 +531,8 @@ void setup () {
   int val = lcc_context_generate_alias(ctx);
   if(val != LCC_OK){
     Serial.println(F("ERROR: Can't generate alias!"));
+    Serial.print("Error code: ");
+    Serial.println(val);
     while(1){}
   }
   
