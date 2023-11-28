@@ -8,6 +8,7 @@
 		<softwareVersion>0.1</softwareVersion>
 	</identification>
 	<acdi/>
+<!--
 	<segment space='251'>
 		<name>Node ID</name>
 		<group>
@@ -20,6 +21,7 @@
 			</string>
 		</group>	
 	</segment>
+-->
 	
 	<segment space='253'>
 		<name>Routes</name>
@@ -34,6 +36,20 @@
 					<description>GPIO number to use as input to this sensor on this route.  Set to 0 to disable and use EventIDs.</description>
 				</int>
 				<int size='1'>
+					<name>GPIO Type</name>
+					<description>GPIO Type(analog or normal)</description>
+					<map>
+						<relation>
+							<property>0</property>
+							<value>GPIO</value>
+						</relation>
+						<relation>
+							<property>1</property>
+							<value>Analog GPIO</value>
+						</relation>
+					</map>
+				</int>
+				<int size='1'>
 					<name>Polarity</name>
 					<description>GPIO polarity</description>
 					<map>
@@ -46,6 +62,14 @@
 							<value>Low</value>
 						</relation>
 					</map>
+				</int>
+				<!-- 1 byte padding here -->
+				<int size='2' offset='1'>
+					<name>Analog Value</name>
+					<description>If using an analog pin, values above this will be 'on'</description>
+					<min>0</min>
+					<max>1023</max>
+					<default>250</default>
 				</int>
 				<eventid>
 					<name>Event Id ON</name>
@@ -103,5 +127,15 @@
 				</eventid>
 			</group>
 		</group>
+
+		<!-- The next page contains other information about the system. -->
+		<!-- The first two bytes are for meta-info that the software uses, so this offset must be two more than the route replication -->
+		<int size='2' offset='44'>
+			<name>Timeout</name>
+			<description>Timeout value for system to reset and become 'inactive'.  This value is in seconds</description>
+			<min>0</min>
+			<max>120</max>
+			<default>25</default>
+		</int>
 	</segment>
 </cdi>

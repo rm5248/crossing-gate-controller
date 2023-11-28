@@ -3,15 +3,38 @@
 
 #include <stdint.h>
 
-#define POLARITY_ACTIVE_HIGH 0
-#define POLARITY_ACTIVE_LOW 1
+#define FLAG_POLARITY (0x01 << 0)
+#define FLAG_USE_ANALOG (0x01 << 1)
+#define FLAG_POLARITY_ACTIVE_HIGH 0
+#define FLAG_POLARITY_ACTIVE_LOW 1
 
 #define ROUTE_SWITCH_INPUT_NORMAL 0
 #define ROUTE_SWITCH_INPUT_REVERSE 1
 
+// Layout of the sensor input in EEPROM
+struct sensor_input_eeprom{
+  uint8_t gpio_number;
+  uint8_t gpio_type;
+  uint8_t polarity;
+  uint8_t padding;
+  uint16_t analog_value;
+  uint64_t event_id_on;
+  uint64_t event_id_off;
+};
+
+struct switch_input_eeprom{
+  uint8_t gpio_number;
+  uint8_t polarity;
+  uint8_t route_posistion;
+  uint8_t padding;
+  uint64_t event_id_normal;
+  uint64_t event_id_reverse;
+};
+
 struct sensor_input{
 	uint8_t gpio;
-	uint8_t polarity;
+	uint8_t flags;
+  uint16_t analog_value;
 
 	// If using event IDs:
 	uint64_t event_id_on;

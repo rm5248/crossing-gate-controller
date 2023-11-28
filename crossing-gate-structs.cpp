@@ -1,14 +1,40 @@
 #include "crossing-gate-structs.h"
 #include <Arduino.h>
 
+static int gpioToAnalog(int num){
+  switch(num){
+    case 0: return A0;
+    case 1: return A1;
+    case 2: return A2;
+    case 3: return A3;
+    case 4: return A4;
+    case 5: return A5;
+    case 6: return A6;
+    case 7: return A7;
+  }
+}
+
 int sensor_input_value(struct sensor_input* input){
 	int val;
+  int polarity = input->flags & FLAG_POLARITY;
 
 	if(input->gpio > 0){
-		val = digitalRead(input->gpio);
-		if(input->polarity == POLARITY_ACTIVE_LOW){
-			val = !val;
-		}
+
+    if(input->flags & FLAG_USE_ANALOG){
+      val = analogRead(input->gpio);
+
+      if(val >= input->analog_value){
+        val = 1;
+      }else{
+        val = 0;
+      }
+    }else{
+      val = digitalRead(input->gpio);
+    }
+
+    if(polarity == FLAG_POLARITY_ACTIVE_LOW){
+      val = !val;
+    }
 
 		return val;
 	}
@@ -40,7 +66,7 @@ int sensor_input_valid(struct sensor_input* input){
 int switch_input_value(struct switch_input* input){
   if(input->gpio > 0){
       int val = digitalRead(input->gpio);
-      if(input->polarity == POLARITY_ACTIVE_LOW){
+      if(input->polarity == FLAG_POLARITY_ACTIVE_LOW){
         val = !val;
       }
       return val;
