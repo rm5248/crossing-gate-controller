@@ -8,7 +8,6 @@
 		<softwareVersion>0.1</softwareVersion>
 	</identification>
 	<acdi/>
-<!--
 	<segment space='251'>
 		<name>Node ID</name>
 		<group>
@@ -21,7 +20,6 @@
 			</string>
 		</group>	
 	</segment>
--->
 	
 	<segment space='253'>
 		<name>Routes</name>
@@ -128,14 +126,39 @@
 			</group>
 		</group>
 
-		<!-- The next page contains other information about the system. -->
-		<!-- The first two bytes are for meta-info that the software uses, so this offset must be two more than the route replication -->
-		<int size='2' offset='44'>
+	</segment>
+
+	<segment space='253' origin='8192'>
+		<name>General Config</name>
+
+		<!-- invisible EEPROM version here -->
+		<int size='1' offset='1'>
 			<name>Timeout</name>
 			<description>Timeout value for system to reset and become 'inactive'.  This value is in seconds</description>
 			<min>0</min>
 			<max>120</max>
 			<default>25</default>
+		</int>
+
+		<int size='1'>
+			<name>Gate output</name>
+			<description>GPIO to turn ON when gates should be down</description>
+			<min>0</min>
+			<max>100</max>
+		</int>
+
+		<int size='1'>
+			<name>LED GPIO 1</name>
+			<description>GPIO to turn ON to toggle LED 1 on the crossing</description>
+			<min>0</min>
+			<max>100</max>
+		</int>
+
+		<int size='1'>
+			<name>LED GPIO 2</name>
+			<description>GPIO to turn ON to toggle LED 2 on the crossing</description>
+			<min>0</min>
+			<max>100</max>
 		</int>
 	</segment>
 </cdi>

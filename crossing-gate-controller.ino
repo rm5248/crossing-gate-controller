@@ -1,4 +1,5 @@
 #include <ACAN2515.h>
+#include <m95_eeprom.h>
 #include <lcc.h>
 #include <lcc-common-internal.h>
 #include <lcc-datagram.h>
@@ -7,6 +8,14 @@
 
 #include "crossing-gate-structs.h"
 
+#if 0
+#define PAUSE(x) do{Serial.println(x); \
+      while(Serial.available() == 0){} \
+    Serial.read();}while(0)
+#else
+#define PAUSE(x)
+#endif
+
 // Size per route is:
 // 4x sensor inputs(align to 64 bytes)
 // 8x switch inputs(align to 64 bytes)
@@ -14,10 +23,11 @@
 #define NUM_ROUTES 8
 
 // 1x other space(align to 64 bytes)
-#define MAX_MEMORY_BYTES ((NUM_ROUTES * MEMORY_SIZE_ROUTE_EEPROM) + 64)
+#define MAX_MEMORY_BYTES (NUM_ROUTES * MEMORY_SIZE_ROUTE_EEPROM)
+#define MAX_MEMORY_LOCATION 0x3500
 
-// STM32
-// #include "stm32f401xe.h"
+static const uint32_t GENERAL_CONFIG_LOCATION = 0x2000;
+static const uint32_t SPACE_251_LOCATION = 0x3000;
 
 const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
 <cdi xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:noNamespaceSchemaLocation='http://openlcb.org/schema/cdi/1/1/cdi.xsd'> \
@@ -28,20 +38,18 @@ const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
 <softwareVersion>0.1</softwareVersion> \
 </identification> \
 <acdi/> \
-<!-- \
-	<segment space='251'> \
-		<name>Node ID</name> \
-		<group> \
-			<name>Your name and description for this node</name> \
-			<string size='63'> \
-				<name>Node Name</name> \
-			</string> \
-			<string size='64' offset='1'> \
-				<name>Node Description</name> \
-			</string> \
-		</group>	 \
-	</segment> \
---> \
+<segment space='251'> \
+<name>Node ID</name> \
+<group> \
+<name>Your name and description for this node</name> \
+<string size='63'> \
+<name>Node Name</name> \
+</string> \
+<string size='64' offset='1'> \
+<name>Node Description</name> \
+</string> \
+</group> \
+</segment> \
 <segment space='253'> \
 <name>Routes</name> \
 <group replication='8'> \
@@ -145,36 +153,46 @@ const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
 </eventid> \
 </group> \
 </group> \
-<!-- The next page contains other information about the system. --> \
-<!-- The first two bytes are for meta-info that the software uses, so this offset must be two more than the route replication --> \
-<int size='2' offset='44'> \
+</segment> \
+<segment space='253' origin='8192'> \
+<name>General Config</name> \
+<!-- invisible EEPROM version here --> \
+<int size='1' offset='1'> \
 <name>Timeout</name> \
 <description>Timeout value for system to reset and become 'inactive'.  This value is in seconds</description> \
 <min>0</min> \
 <max>120</max> \
 <default>25</default> \
 </int> \
+<int size='1'> \
+<name>Gate output</name> \
+<description>GPIO to turn ON when gates should be down</description> \
+<min>0</min> \
+<max>100</max> \
+</int> \
+<int size='1'> \
+<name>LED GPIO 1</name> \
+<description>GPIO to turn ON to toggle LED 1 on the crossing</description> \
+<min>0</min> \
+<max>100</max> \
+</int> \
+<int size='1'> \
+<name>LED GPIO 2</name> \
+<description>GPIO to turn ON to toggle LED 2 on the crossing</description> \
+<min>0</min> \
+<max>100</max> \
+</int> \
 </segment> \
 </cdi>" };
 
-static const byte MCP2515_CS  = 9 ; // CS input of MCP2515 (adapt to your design) 
+static const byte MCP2515_CS  = 8 ; // CS input of MCP2515 (adapt to your design) 
 static const byte MCP2515_INT =  2 ; // INT output of MCP2515 (adapt to your design)
-static const byte EEPROM_CS = 10;
-
-static const byte EEPROM_WRITE_ENABLE = 0x6;
-static const byte EEPROM_READ_STATUS_REGISTER = 0x5;
-static const byte EEPROM_WRITE_STATUS_REGISTER = 0x1;
-static const byte EEPROM_READ_MEMORY_ARRAY = 0x3;
-static const byte EEPROM_WRITE_MEMORY_ARRAY = 0x2;
-static const byte EEPROM_WRITE_DISABLE = 0x4;
-
-static const int LCC_UNIQUE_ID_ADDR = 0x6000;
+static const byte EEPROM_CS = 7;
 
 // The CAN controller.  This example uses the ACAN2515 library from Pierre Molinaro:
 // https://github.com/pierremolinaro/acan2515
-// This particular example also uses the SparkFun CAN-BUS Shield:
-// https://www.sparkfun.com/products/13262
 ACAN2515 can (MCP2515_CS, SPI, MCP2515_INT) ;
+M95_EEPROM eeprom(SPI, EEPROM_CS, 256, 3, true);
 
 static const uint32_t QUARTZ_FREQUENCY = 16UL * 1000UL * 1000UL ; // 16 MHz
 
@@ -183,6 +201,7 @@ CANMessage frame ;
 struct lcc_can_frame lcc_frame;
 unsigned long claim_alias_time;
 static uint32_t gBlinkLedDate = 0 ;
+static uint32_t blink_crossing_led_time = 0 ;
 static uint64_t unique_id;
 
 enum GateFlashState{
@@ -194,99 +213,15 @@ enum GateFlashState gate_flash;
 unsigned long timeout_millis = 25000;
 struct route crossing_routes[NUM_ROUTES];
 int blink_val = 0;
+unsigned long reload_when = 0;
 
-int found_eeprom = 0;
-
-void find_eeprom(){
-  Serial.println("Looking for EEPROM");
-
-  delay(5);
-
-  digitalWrite(EEPROM_CS, LOW);
-  SPI.transfer(EEPROM_WRITE_ENABLE);
-  digitalWrite(EEPROM_CS, HIGH);
-
-  delay(5);
-
-  digitalWrite(EEPROM_CS, LOW);
-  SPI.transfer(EEPROM_READ_STATUS_REGISTER);
-  int read_status_reg = SPI.transfer(0xFF);
-  digitalWrite(EEPROM_CS, HIGH);
-
-  delay(5);
-
-  Serial.print("status reg: ");
-  Serial.println(read_status_reg);
-
-  if(read_status_reg != 0xFF &&
-     read_status_reg & (0x01 << 1)){
-    // WEL bit is set, so we are talking with the EEPROM!
-    // Let's go and disable it again
-    found_eeprom = 1;
-    digitalWrite(EEPROM_CS, LOW);
-    SPI.transfer(EEPROM_WRITE_DISABLE);
-    digitalWrite(EEPROM_CS, HIGH);
-    Serial.println("Found EEPROM!");
-  }
-}
-
-void eeprom_read(int offset, void* data, int numBytes){
-  digitalWrite(EEPROM_CS, LOW);
-  delay(2);
-  SPI.transfer(EEPROM_READ_MEMORY_ARRAY);
-
-  SPI.transfer((offset & 0xFF00) >> 8);
-  SPI.transfer((offset & 0x00FF) >> 0);
-
-  uint8_t* u8_data = data;
-  while(numBytes > 0){
-    numBytes--;
-    *u8_data = SPI.transfer(0xFF); // dummy byte
-    u8_data++;
-  }
-
-  digitalWrite(EEPROM_CS, HIGH);
-}
-
-// Note: only handles one page at a time.  Anything more than a page is a bug.
-// Page size: 64 bytes
-void eeprom_write(int offset, void* data, int numBytes){
-  digitalWrite(EEPROM_CS, LOW);
-  SPI.transfer(EEPROM_WRITE_ENABLE);
-  digitalWrite(EEPROM_CS, HIGH);
-
-  delay(5);
-
-  digitalWrite(EEPROM_CS, LOW);
-  SPI.transfer(EEPROM_WRITE_MEMORY_ARRAY);
-  SPI.transfer((offset & 0xFF00) >> 8);
-  SPI.transfer((offset & 0x00FF) >> 0);
-
-  uint8_t* u8_data = data;
-  while(numBytes > 0){
-    numBytes--;
-    SPI.transfer(*u8_data); // data byte
-    u8_data++;
-  }
-
-  digitalWrite(EEPROM_CS, HIGH);
-
-  int numTimes = 0;
-  while(numTimes < 10){
-    // Read until the write in progress bit is 0
-    numTimes++;
-    delay(1);
-
-    digitalWrite(EEPROM_CS, LOW);
-    SPI.transfer(EEPROM_READ_STATUS_REGISTER);
-    int read_status_reg = SPI.transfer(0xFF);
-    digitalWrite(EEPROM_CS, HIGH);
-
-    if(read_status_reg & 0x01 == 0){
-      break;
-    }
-  }
-}
+struct general_config{
+  uint8_t eeprom_version;
+  uint8_t timeout_seconds;
+  uint8_t gate_gpio;
+  uint8_t led_gpio1;
+  uint8_t led_gpio2;
+} general_config;
 
 void display_freeram() {
   Serial.print(F("- SRAM left: "));
@@ -350,9 +285,22 @@ void handle_gate_flash(){
     gate_flash = expectedGateFlashState;
 
     if(gate_flash == FLASH_ON){
-      digitalWrite(5, 1);
+      digitalWrite(general_config.gate_gpio, 1);
     }else{
-      digitalWrite(5, 0);
+      digitalWrite(general_config.gate_gpio, 0);
+      digitalWrite(general_config.led_gpio1, 0);
+      digitalWrite(general_config.led_gpio2, 0);
+    }
+  }
+
+  if(gate_flash == FLASH_ON){
+    unsigned long currentMillis = millis();
+    if (currentMillis - blink_crossing_led_time >= 500) {
+      blink_crossing_led_time = currentMillis;
+
+      digitalWrite(general_config.led_gpio1, blink_val);
+      digitalWrite(general_config.led_gpio2, !blink_val);
+      blink_val = !blink_val;
     }
   }
 }
@@ -463,12 +411,13 @@ void handle_single_route(struct route* route){
 
 static void write_defaults_to_eeprom(){
   // Note: all values in LCC are defined as big-endian, so we will store it that way as well.
-  uint16_t eeprom_info = __builtin_bswap16(1);
   uint16_t eeprom_offset = 0;
-  uint16_t timeout_value = __builtin_bswap16(25);
 
-  eeprom_write(MAX_MEMORY_BYTES - 64, &eeprom_info, 2);
-  eeprom_write(MAX_MEMORY_BYTES - 62, &timeout_value, 2);
+  memset(&general_config, 0, sizeof(general_config));
+  general_config.eeprom_version = 1;
+  general_config.timeout_seconds = 25;
+
+  eeprom.write(GENERAL_CONFIG_LOCATION, sizeof(general_config), &general_config);
 
   for(int x = 0; x < NUM_ROUTES; x++){
     for(int sensor_input = 0; sensor_input < 4; sensor_input++){
@@ -476,7 +425,7 @@ static void write_defaults_to_eeprom(){
       struct sensor_input_eeprom* sensor_eeprom = (sensor_input_eeprom*)bytes;
       sensor_eeprom->analog_value = __builtin_bswap16(250);
 
-      eeprom_write(eeprom_offset, bytes, sizeof(bytes));
+      eeprom.write(eeprom_offset, sizeof(bytes), bytes);
 
       eeprom_offset += 64;
     }
@@ -484,11 +433,15 @@ static void write_defaults_to_eeprom(){
     for(int switch_input = 0; switch_input < 8; switch_input++){
       uint8_t bytes[64] = {0};
 
-      eeprom_write(eeprom_offset, bytes, sizeof(bytes));
+      eeprom.write(eeprom_offset, sizeof(bytes), bytes);
 
       eeprom_offset += 64;
     }
   }
+}
+
+static void load_general_config(){
+  eeprom.read(GENERAL_CONFIG_LOCATION, sizeof(general_config), &general_config);
 }
 
 static void load_from_eeprom(){
@@ -498,31 +451,21 @@ static void load_from_eeprom(){
 
   memset(crossing_routes, 0, sizeof(crossing_routes));
 
+  load_general_config();
+
   // Load some of our default values.
   // If the EEPROM is blank, we first go and write out sane default values
-  uint16_t eeprom_info;
-  eeprom_read(MAX_MEMORY_BYTES - 64, &eeprom_info, 2);
-
-  if(eeprom_info == 0xFFFF){
+  if(general_config.eeprom_version == 0xFF){
     // EEPROM is blank - write out default values
     Serial.println("EEPROM blank - initializing");
     write_defaults_to_eeprom();
   }
 
-  // Re-read our stuff
-  eeprom_read(MAX_MEMORY_BYTES - 64, &eeprom_info, 2);
-  eeprom_info = __builtin_bswap16(eeprom_info);
-  Serial.print("EEPROM Version ");
-  Serial.println(eeprom_info);
-
-  uint16_t default_timeout;
-  eeprom_read(MAX_MEMORY_BYTES - 62, &default_timeout, 2);
-  default_timeout = __builtin_bswap16(default_timeout);
-  timeout_millis = default_timeout * 1000;
+  timeout_millis = general_config.timeout_seconds * 1000;
 
   for(int x = 0; x < NUM_ROUTES; x++){
     for(int sensor_input = 0; sensor_input < 4; sensor_input++){
-      eeprom_read(eeprom_offset, &sensor_eeprom, sizeof(sensor_eeprom));
+      eeprom.read(eeprom_offset, sizeof(sensor_eeprom), &sensor_eeprom);
       crossing_routes[x].inputs[sensor_input].analog_value = __builtin_bswap16(sensor_eeprom.analog_value);
       crossing_routes[x].inputs[sensor_input].event_id_off = __builtin_bswap64(sensor_eeprom.event_id_off);
       crossing_routes[x].inputs[sensor_input].event_id_on = __builtin_bswap64(sensor_eeprom.event_id_on);
@@ -534,16 +477,24 @@ static void load_from_eeprom(){
         crossing_routes[x].inputs[sensor_input].flags |= FLAG_POLARITY_ACTIVE_LOW;
       }
 
+      if(sensor_eeprom.gpio_number){
+        pinMode(sensor_eeprom.gpio_number, INPUT);
+      }
+
       eeprom_offset += 64;
     }
 
     for(int switch_input = 0; switch_input < 8; switch_input++){
-      eeprom_read(eeprom_offset, &switch_eeprom, sizeof(switch_eeprom));
+      eeprom.read(eeprom_offset, sizeof(switch_eeprom), &switch_eeprom);
       crossing_routes[x].switch_inputs[switch_input].event_id_normal = __builtin_bswap64(switch_eeprom.event_id_normal);
       crossing_routes[x].switch_inputs[switch_input].event_id_reverse = __builtin_bswap64(switch_eeprom.event_id_reverse);
       crossing_routes[x].switch_inputs[switch_input].gpio = switch_eeprom.gpio_number;
       crossing_routes[x].switch_inputs[switch_input].polarity = switch_eeprom.polarity;
       crossing_routes[x].switch_inputs[switch_input].route_position = switch_eeprom.route_posistion;
+
+      if(switch_eeprom.gpio_number){
+        pinMode(switch_eeprom.gpio_number, INPUT);
+      }
 
       eeprom_offset += 64;
     }
@@ -576,9 +527,8 @@ void mem_address_space_read(struct lcc_memory_context* ctx, uint16_t alias, uint
   Serial.println();
   if(address_space == 251){
     // This space is what we use for node name/description.
-    // The data for this space starts at offset 0x4000
     uint8_t buffer[64];
-    eeprom_read(starting_address + 0x4000, buffer, read_count);
+    eeprom.read(SPACE_251_LOCATION + starting_address, read_count, buffer);
 
     // For any blank data, we will read 0xFF
     for(int x = 0; x < sizeof(buffer); x++){
@@ -590,7 +540,7 @@ void mem_address_space_read(struct lcc_memory_context* ctx, uint16_t alias, uint
     lcc_memory_respond_read_reply_ok(ctx, alias, address_space, starting_address, buffer, read_count);
   }else if(address_space == 253){
     // Basic config space
-    if((starting_address + read_count) > MAX_MEMORY_BYTES){
+    if((starting_address + read_count) > MAX_MEMORY_LOCATION){
       Serial.println("too much memory??");
       // trying to read too much memory
       lcc_memory_respond_read_reply_fail(ctx, alias, address_space, 0, 0, NULL);
@@ -598,7 +548,7 @@ void mem_address_space_read(struct lcc_memory_context* ctx, uint16_t alias, uint
     }
 
     uint8_t buffer[64];
-    eeprom_read(starting_address, buffer, read_count);
+    eeprom.read(starting_address, read_count, buffer);
 
     lcc_memory_respond_read_reply_ok(ctx, alias, address_space, starting_address, buffer, read_count);
   }else{
@@ -606,25 +556,36 @@ void mem_address_space_read(struct lcc_memory_context* ctx, uint16_t alias, uint
     lcc_memory_respond_read_reply_fail(ctx, alias, address_space, 0, 0, NULL);
     return;
   }
-
-  Serial.println("DOne read");
 }
 
 void mem_address_space_write(struct lcc_memory_context* ctx, uint16_t alias, uint8_t address_space, uint32_t starting_address, void* data, int data_len){
+  Serial.print("Write space ");
+  Serial.print(address_space);
+  Serial.print(" starting addr " );
+  Serial.print(starting_address);
+  Serial.print(" write count ");
+  Serial.print(data_len);
+  Serial.println();
+
   if(address_space == 251){
-    eeprom_write(starting_address, data, data_len);
+    eeprom.write(SPACE_251_LOCATION + starting_address, data_len, data);
 
     lcc_memory_respond_write_reply_ok(ctx, alias, address_space, starting_address);
   }else if(address_space == 253){
-    eeprom_write(starting_address, data, data_len);
+    eeprom.write(starting_address, data_len, data);
 
-    load_from_eeprom();
+    reload_when = millis() + 500;
 
     lcc_memory_respond_write_reply_ok(ctx, alias, address_space, starting_address);
   }else{
+    Serial.println("Write fail");
     lcc_memory_respond_write_reply_fail(ctx, alias, address_space, starting_address, 0, NULL);
     return;
   }
+}
+
+static void can_isr(){
+  can.isr();
 }
 
 void setup () {
@@ -636,19 +597,31 @@ void setup () {
 
   Serial.println("Crossing gate controller starting up");
 
+  PAUSE("press any key to start");
+
   SPI.begin();
 
-  pinMode(EEPROM_CS, OUTPUT);
-  digitalWrite(EEPROM_CS, HIGH);
+  PAUSE("press any key to begin EEPROM");
+  eeprom.begin();
 
-  find_eeprom();
+  PAUSE("press any key to check if EEPROM exists");
+  if(!eeprom.exists()){
+    Serial.println("No EEPROM: PANIC!");
+    while(1){}
+  }
+
+  PAUSE("press any key to check EEPROM status register");
+  Serial.print("EEPROM status: ");
+  Serial.println(eeprom.status_register(), HEX);
 
   gate_flash = FLASH_OFF;
 
   display_freeram();
 
+  PAUSE("press any key to read ID page");
+
   unique_id = 0;
-  eeprom_read(LCC_UNIQUE_ID_ADDR, &unique_id, 8);
+  eeprom.read_id_page(8, &unique_id);
 
   Serial.print("ID: ");
   for(int x = 0; x < 8; x++){
@@ -658,6 +631,25 @@ void setup () {
   Serial.println();
 
   load_from_eeprom();
+
+  Serial.print("General config EEPROM version ");
+  Serial.println(general_config.eeprom_version);
+
+  if(general_config.gate_gpio){
+    Serial.print("Gate GPIO ");
+    Serial.println(general_config.gate_gpio);
+    pinMode(general_config.gate_gpio, OUTPUT);
+  }
+  if(general_config.led_gpio1){
+    Serial.print("LED1 GPIO ");
+    Serial.println(general_config.led_gpio1);
+    pinMode(general_config.led_gpio1, OUTPUT);
+  }
+  if(general_config.led_gpio2){
+    Serial.print("LED2 GPIO ");
+    Serial.println(general_config.led_gpio2);
+    pinMode(general_config.led_gpio2, OUTPUT);
+  }
 
   // Create an LCC context that determines our communications
   ctx = lcc_context_new();
@@ -700,22 +692,6 @@ void setup () {
   pinMode (LED_BUILTIN, OUTPUT) ;
   digitalWrite (LED_BUILTIN, HIGH) ;
 
-  pinMode(4, INPUT);
-  pinMode(5, OUTPUT);
-  pinMode(6, OUTPUT);
-
-  // Input sensors for the track
-  pinMode(A0, INPUT);
-  pinMode(A1, INPUT);
-  pinMode(A2, INPUT);
-  pinMode(A3, INPUT);
-  pinMode(2, INPUT);
-  pinMode(3, INPUT);
-  // pinMode(A4, INPUT);
-  // pinMode(A5, INPUT);
-
-
-  SPI.begin () ;
   display_freeram();
   Serial.println (F("Configure ACAN2515")) ;
   ACAN2515Settings settings (QUARTZ_FREQUENCY, 125UL * 1000UL) ; // CAN bit rate 125 kb/s
@@ -724,7 +700,7 @@ void setup () {
   // the ACAN2515 library will allocate too much memory
   settings.mReceiveBufferSize = 4;
   settings.mTransmitBuffer0Size = 12;
-  const uint16_t errorCode = can.begin (settings, [] { can.isr () ; }) ;
+  const uint16_t errorCode = can.begin (settings, can_isr) ;
   if (errorCode != 0) {
     Serial.print ("Configuration error 0x") ;
     Serial.println (errorCode, HEX) ;
@@ -762,6 +738,11 @@ void loop() {
     blink_val = !blink_val;
     // Serial.print(F("blink: "));
     // Serial.println(millis());
+
+    if(digitalRead(MCP2515_INT) == 0){
+      Serial.println("NO IRQ?? PANIC!");
+      while(1){}
+    }
   }
 
   if(millis() >= claim_alias_time &&
@@ -777,24 +758,15 @@ void loop() {
     }
   }
 
-  // Read the value of pin 4 - if it changes state, send an event
-  // int currentVal = !!digitalRead(4);
-  // if(currentVal != inputValue){
-  //   inputValue = currentVal;
-  //   uint64_t event_id = lcc_context_unique_id(ctx) << 16llu;
-
-  //   if(currentVal == 0){
-  //     lcc_event_produce_event(lcc_context_get_event_context(ctx), event_id);
-  //   }else{
-  //     lcc_event_produce_event(lcc_context_get_event_context(ctx), event_id + 1);
-  //   }
-
-  //   // Light up LED with current status
-  //   digitalWrite(7, currentVal);
-  // }
-
   for(int x = 0; x < sizeof(crossing_routes) / sizeof(crossing_routes[0]); x++){
     handle_single_route(&crossing_routes[x]);
   }
+
   handle_gate_flash();
+
+  if(reload_when && (reload_when < millis())){
+    Serial.println("Reload settings from EEPROM");
+    load_from_eeprom();
+    reload_when = 0;
+  }
 }
