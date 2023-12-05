@@ -77,6 +77,7 @@
 					<name>Event Id OFF</name>
 					<description>If not using GPIO, event ID to indicate that this sensor is off</description>
 				</eventid>
+				<group offset='42'/>
 			</group>
 			
 			<!-- Switch inputs -->
@@ -123,6 +124,7 @@
 					<name>Event Id Reverse</name>
 					<description>If not using GPIO, event ID to indicate that this switch is reversed</description>
 				</eventid>
+				<group offset='45'/>
 			</group>
 		</group>
 
@@ -148,6 +150,13 @@
 		</int>
 
 		<int size='1'>
+			<name>Gate output 2</name>
+			<description>GPIO to turn ON when gates should be down</description>
+			<min>0</min>
+			<max>100</max>
+		</int>
+
+		<int size='1'>
 			<name>LED GPIO 1</name>
 			<description>GPIO to turn ON to toggle LED 1 on the crossing</description>
 			<min>0</min>
@@ -159,6 +168,14 @@
 			<description>GPIO to turn ON to toggle LED 2 on the crossing</description>
 			<min>0</min>
 			<max>100</max>
+		</int>
+
+		<int size='2'>
+			<name>LED Flash Time</name>
+			<description>How long for each LED on the crossing to flash in milliseconds</description>
+			<min>0</min>
+			<max>1000</max>
+			<default>250</default>
 		</int>
 	</segment>
 </cdi>

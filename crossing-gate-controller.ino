@@ -106,6 +106,7 @@ const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
 <name>Event Id OFF</name> \
 <description>If not using GPIO, event ID to indicate that this sensor is off</description> \
 </eventid> \
+<group offset='42'/> \
 </group> \
 <!-- Switch inputs --> \
 <group replication='8'> \
@@ -151,6 +152,7 @@ const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
 <name>Event Id Reverse</name> \
 <description>If not using GPIO, event ID to indicate that this switch is reversed</description> \
 </eventid> \
+<group offset='45'/> \
 </group> \
 </group> \
 </segment> \
@@ -171,6 +173,12 @@ const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
 <max>100</max> \
 </int> \
 <int size='1'> \
+<name>Gate output 2</name> \
+<description>GPIO to turn ON when gates should be down</description> \
+<min>0</min> \
+<max>100</max> \
+</int> \
+<int size='1'> \
 <name>LED GPIO 1</name> \
 <description>GPIO to turn ON to toggle LED 1 on the crossing</description> \
 <min>0</min> \
@@ -181,6 +189,13 @@ const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
 <description>GPIO to turn ON to toggle LED 2 on the crossing</description> \
 <min>0</min> \
 <max>100</max> \
+</int> \
+<int size='2'> \
+<name>LED Flash Time</name> \
+<description>How long for each LED on the crossing to flash in milliseconds</description> \
+<min>0</min> \
+<max>1000</max> \
+<default>250</default> \
 </int> \
 </segment> \
 </cdi>" };
@@ -218,9 +233,11 @@ unsigned long reload_when = 0;
 struct general_config{
   uint8_t eeprom_version;
   uint8_t timeout_seconds;
-  uint8_t gate_gpio;
+  uint8_t gate_gpio1;
+  uint8_t gate_gpio2;
   uint8_t led_gpio1;
   uint8_t led_gpio2;
+  uint16_t led_flash_time;
 } general_config;
 
 void display_freeram() {
@@ -285,9 +302,11 @@ void handle_gate_flash(){
     gate_flash = expectedGateFlashState;
 
     if(gate_flash == FLASH_ON){
-      digitalWrite(general_config.gate_gpio, 1);
+      digitalWrite(general_config.gate_gpio1, 1);
+      digitalWrite(general_config.gate_gpio2, 1);
     }else{
-      digitalWrite(general_config.gate_gpio, 0);
+      digitalWrite(general_config.gate_gpio1, 0);
+      digitalWrite(general_config.gate_gpio2, 0);
       digitalWrite(general_config.led_gpio1, 0);
       digitalWrite(general_config.led_gpio2, 0);
     }
@@ -295,7 +314,7 @@ void handle_gate_flash(){
 
   if(gate_flash == FLASH_ON){
     unsigned long currentMillis = millis();
-    if (currentMillis - blink_crossing_led_time >= 500) {
+    if ((currentMillis - blink_crossing_led_time) >= general_config.led_flash_time) {
       blink_crossing_led_time = currentMillis;
 
       digitalWrite(general_config.led_gpio1, blink_val);
@@ -416,8 +435,11 @@ static void write_defaults_to_eeprom(){
   memset(&general_config, 0, sizeof(general_config));
   general_config.eeprom_version = 1;
   general_config.timeout_seconds = 25;
+  general_config.led_flash_time = __builtin_bswap16(250);
 
   eeprom.write(GENERAL_CONFIG_LOCATION, sizeof(general_config), &general_config);
+
+  general_config.led_flash_time = 250;
 
   for(int x = 0; x < NUM_ROUTES; x++){
     for(int sensor_input = 0; sensor_input < 4; sensor_input++){
@@ -442,6 +464,27 @@ static void write_defaults_to_eeprom(){
 
 static void load_general_config(){
   eeprom.read(GENERAL_CONFIG_LOCATION, sizeof(general_config), &general_config);
+
+  if(general_config.gate_gpio1){
+    Serial.print("Gate1 GPIO ");
+    Serial.println(general_config.gate_gpio1);
+    pinMode(general_config.gate_gpio1, OUTPUT);
+  }
+  if(general_config.gate_gpio2){
+    Serial.print("Gate2 GPIO ");
+    Serial.println(general_config.gate_gpio2);
+    pinMode(general_config.gate_gpio2, OUTPUT);
+  }
+  if(general_config.led_gpio1){
+    Serial.print("LED1 GPIO ");
+    Serial.println(general_config.led_gpio1);
+    pinMode(general_config.led_gpio1, OUTPUT);
+  }
+  if(general_config.led_gpio2){
+    Serial.print("LED2 GPIO ");
+    Serial.println(general_config.led_gpio2);
+    pinMode(general_config.led_gpio2, OUTPUT);
+  }
 }
 
 static void load_from_eeprom(){
@@ -479,6 +522,8 @@ static void load_from_eeprom(){
 
       if(sensor_eeprom.gpio_number){
         pinMode(sensor_eeprom.gpio_number, INPUT);
+        Serial.print("Sensor GPIO number ");
+        Serial.println(sensor_eeprom.gpio_number);
       }
 
       eeprom_offset += 64;
@@ -634,22 +679,6 @@ void setup () {
 
   Serial.print("General config EEPROM version ");
   Serial.println(general_config.eeprom_version);
-
-  if(general_config.gate_gpio){
-    Serial.print("Gate GPIO ");
-    Serial.println(general_config.gate_gpio);
-    pinMode(general_config.gate_gpio, OUTPUT);
-  }
-  if(general_config.led_gpio1){
-    Serial.print("LED1 GPIO ");
-    Serial.println(general_config.led_gpio1);
-    pinMode(general_config.led_gpio1, OUTPUT);
-  }
-  if(general_config.led_gpio2){
-    Serial.print("LED2 GPIO ");
-    Serial.println(general_config.led_gpio2);
-    pinMode(general_config.led_gpio2, OUTPUT);
-  }
 
   // Create an LCC context that determines our communications
   ctx = lcc_context_new();

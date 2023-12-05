@@ -21,7 +21,7 @@ int sensor_input_value(struct sensor_input* input){
 	if(input->gpio > 0){
 
     if(input->flags & FLAG_USE_ANALOG){
-      val = analogRead(input->gpio);
+      val = analogRead(gpioToAnalog(input->gpio));
 
       if(val >= input->analog_value){
         val = 1;
