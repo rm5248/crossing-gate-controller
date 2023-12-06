@@ -36,6 +36,16 @@ int sensor_input_value(struct sensor_input* input){
       val = !val;
     }
 
+    // if(val){
+    //   if(input->flags & FLAG_USE_ANALOG){
+    //     Serial.print("Analog ");
+    //   }else{
+    //     Serial.print("GPIO ");
+    //   }
+    //   Serial.print(input->gpio);
+    //   Serial.println(" ACTIVE");
+    // }
+
 		return val;
 	}
 

@@ -229,6 +229,7 @@ unsigned long timeout_millis = 25000;
 struct route crossing_routes[NUM_ROUTES];
 int blink_val = 0;
 unsigned long reload_when = 0;
+int no_irq_times = 0;
 
 struct general_config{
   uint8_t eeprom_version;
@@ -320,6 +321,7 @@ void handle_gate_flash(){
       digitalWrite(general_config.led_gpio1, blink_val);
       digitalWrite(general_config.led_gpio2, !blink_val);
       blink_val = !blink_val;
+      // Serial.println("Flash");
     }
   }
 }
@@ -420,7 +422,9 @@ void handle_single_route(struct route* route){
     handle_route_ltr(route, left_input, left_island_input, right_island_input, right_input);
   }
 
-  if(millis_diff > timeout_millis &&
+// Serial.print("millis diff: ");
+// Serial.println(millis_diff);
+  if((millis_diff > timeout_millis) &&
     route->current_train.location != LOCATION_UNOCCUPIED){
     Serial.println(F("timeout"));
     route->current_train.location = LOCATION_UNOCCUPIED;
@@ -485,6 +489,15 @@ static void load_general_config(){
     Serial.println(general_config.led_gpio2);
     pinMode(general_config.led_gpio2, OUTPUT);
   }
+
+  general_config.led_flash_time = __builtin_bswap16(general_config.led_flash_time);
+  if(general_config.led_flash_time){
+    Serial.print("LED flash time ");
+    Serial.println(general_config.led_flash_time);
+  }
+
+  Serial.print("Timeout seconds: ");
+  Serial.println(general_config.timeout_seconds);
 }
 
 static void load_from_eeprom(){
@@ -504,7 +517,10 @@ static void load_from_eeprom(){
     write_defaults_to_eeprom();
   }
 
-  timeout_millis = general_config.timeout_seconds * 1000;
+  timeout_millis = general_config.timeout_seconds * 1000ul;
+  if(timeout_millis > 65000){
+    timeout_millis = 65000;
+  }
 
   for(int x = 0; x < NUM_ROUTES; x++){
     for(int sensor_input = 0; sensor_input < 4; sensor_input++){
@@ -769,8 +785,11 @@ void loop() {
     // Serial.println(millis());
 
     if(digitalRead(MCP2515_INT) == 0){
-      Serial.println("NO IRQ?? PANIC!");
-      while(1){}
+      no_irq_times++;
+      if(no_irq_times >= 3){
+        Serial.println("NO IRQ?? PANIC!");
+        while(1){}
+      }
     }
   }
 
