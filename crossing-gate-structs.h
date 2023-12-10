@@ -70,7 +70,7 @@ enum TrainLocation{
 };
 
 struct train{
-	unsigned long incoming_millis;
+	unsigned long last_seen_millis;
 	enum Direction direction;
 	enum TrainLocation location;
 };

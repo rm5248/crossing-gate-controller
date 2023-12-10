@@ -330,18 +330,22 @@ void handle_route_ltr(struct route* route, int left_input, int left_island_input
   if(left_island_input == 1 && 
     route->current_train.location == LOCATION_PRE_ISLAND_OCCUPIED){
     route->current_train.location = LOCATION_ISLAND_OCCUPIED_INCOMING;
+    route->current_train.last_seen_millis = millis();
     Serial.println(F("Island occupied incoming"));
   }else if(right_island_input == 1 &&
     route->current_train.location == LOCATION_ISLAND_OCCUPIED_INCOMING){
     route->current_train.location = LOCATION_ISLAND_OCCUPIED;
+    route->current_train.last_seen_millis = millis();
     Serial.println(F("island occupied"));
   }else if(right_island_input == 0 &&
     route->current_train.location == LOCATION_ISLAND_OCCUPIED){
     route->current_train.location = LOCATION_POST_ISLAND_OCCUPIED_INCOMING;
+    route->current_train.last_seen_millis = millis();
     Serial.println(F("post island occupied incoming"));
   }else if(right_input == 1 &&
     route->current_train.location == LOCATION_POST_ISLAND_OCCUPIED_INCOMING){
     route->current_train.location = LOCATION_POST_ISLAND_OCCUPIED;
+    route->current_train.last_seen_millis = millis();
     Serial.println(F("post island occupied"));
   }else if(right_input == 0 &&
     route->current_train.location == LOCATION_POST_ISLAND_OCCUPIED){
@@ -355,18 +359,22 @@ void handle_route_rtl(struct route* route, int left_input, int left_island_input
   if(right_island_input == 1 && 
     route->current_train.location == LOCATION_PRE_ISLAND_OCCUPIED){
     route->current_train.location = LOCATION_ISLAND_OCCUPIED_INCOMING;
+    route->current_train.last_seen_millis = millis();
     Serial.println(F("Island occupied incoming"));
   }else if(left_island_input == 1 &&
     route->current_train.location == LOCATION_ISLAND_OCCUPIED_INCOMING){
     route->current_train.location = LOCATION_ISLAND_OCCUPIED;
+    route->current_train.last_seen_millis = millis();
     Serial.println(F("island occupied"));
   }else if(left_island_input == 0 &&
     route->current_train.location == LOCATION_ISLAND_OCCUPIED){
     route->current_train.location = LOCATION_POST_ISLAND_OCCUPIED_INCOMING;
+    route->current_train.last_seen_millis = millis();
     Serial.println(F("post island occupied incoming"));
   }else if(left_input == 1 &&
     route->current_train.location == LOCATION_POST_ISLAND_OCCUPIED_INCOMING){
     route->current_train.location = LOCATION_POST_ISLAND_OCCUPIED;
+    route->current_train.last_seen_millis = millis();
     Serial.println(F("post island occupied"));
   }else if(left_input == 0 &&
     route->current_train.location == LOCATION_POST_ISLAND_OCCUPIED){
@@ -387,7 +395,7 @@ void handle_single_route(struct route* route){
   int left_island_input = sensor_input_value(&route->inputs[1]);
   int right_island_input = sensor_input_value(&route->inputs[2]);
   int right_input = sensor_input_value(&route->inputs[3]);
-  unsigned long millis_diff = millis() - route->current_train.incoming_millis;
+  unsigned long millis_diff = millis() - route->current_train.last_seen_millis;
 
   // First check to see if this is a new train coming into the route
   if((left_input || right_input) &&
@@ -403,7 +411,7 @@ void handle_single_route(struct route* route){
 
       // All switches are in the correct position for this route.
       // This route now has a train in it
-      route->current_train.incoming_millis = millis();
+      route->current_train.last_seen_millis = millis();
       route->current_train.location = LOCATION_PRE_ISLAND_OCCUPIED;
       if(left_input){
         route->current_train.direction = DIRECTION_LTR;
