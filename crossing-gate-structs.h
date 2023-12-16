@@ -2,6 +2,7 @@
 #define CROSSING_GATE_STRUCTS_H
 
 #include <stdint.h>
+#include <debounce.h>
 
 #define FLAG_POLARITY (0x01 << 0)
 #define FLAG_USE_ANALOG (0x01 << 1)
@@ -35,6 +36,7 @@ struct sensor_input{
 	uint8_t gpio;
 	uint8_t flags;
   uint16_t analog_value;
+  Button debouncer;
 
 	// If using event IDs:
 	uint64_t event_id_on;

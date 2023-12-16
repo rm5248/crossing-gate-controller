@@ -543,6 +543,8 @@ static void load_from_eeprom(){
       if(sensor_eeprom.polarity){
         crossing_routes[x].inputs[sensor_input].flags |= FLAG_POLARITY_ACTIVE_LOW;
       }
+      crossing_routes[x].inputs[sensor_input].debouncer = Button();
+      crossing_routes[x].inputs[sensor_input].debouncer.setPushDebounceInterval(100);
 
       if(sensor_eeprom.gpio_number){
         pinMode(sensor_eeprom.gpio_number, INPUT);

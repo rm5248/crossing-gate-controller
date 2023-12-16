@@ -23,11 +23,17 @@ int sensor_input_value(struct sensor_input* input){
     if(input->flags & FLAG_USE_ANALOG){
       val = analogRead(gpioToAnalog(input->gpio));
 
+      if(input->gpio == 1){
+        // Serial.print("val: ");
+        // Serial.println(val);
+      }
+
       if(val >= input->analog_value){
         val = 1;
       }else{
         val = 0;
       }
+
     }else{
       val = digitalRead(input->gpio);
     }
@@ -45,8 +51,19 @@ int sensor_input_value(struct sensor_input* input){
     //   Serial.print(input->gpio);
     //   Serial.println(" ACTIVE");
     // }
+    
+    // Serial.println(val);
+    bool updated = input->debouncer.update(val);
+    if(updated){
+      Serial.print("Input ");
+      Serial.print(input->gpio);
+      Serial.print(" changed to " );
+      Serial.println(input->debouncer.getState());
+      Serial.print("Sensitivity: ");
+      Serial.println(input->analog_value);
+    }
 
-		return val;
+		return input->debouncer.getState();
 	}
 
 	return input->is_on;
