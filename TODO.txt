@@ -1,0 +1,3 @@
+* Need better debouncing of states.  Currently we are too sensitive after a train leaves, 
+ need to have a debounce delay after the train leaves the crossing detection area before reactivating.
+* If we still detect a train at the crossing, don't raise the gates
