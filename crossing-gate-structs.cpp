@@ -16,17 +16,14 @@ static int gpioToAnalog(int num){
 
 int sensor_input_value(struct sensor_input* input){
 	int val;
+  int raw_val;
   int polarity = input->flags & FLAG_POLARITY;
 
 	if(input->gpio > 0){
 
     if(input->flags & FLAG_USE_ANALOG){
       val = analogRead(gpioToAnalog(input->gpio));
-
-      if(input->gpio == 1){
-        // Serial.print("val: ");
-        // Serial.println(val);
-      }
+      raw_val = val;
 
       if(val >= input->analog_value){
         val = 1;
@@ -60,13 +57,31 @@ int sensor_input_value(struct sensor_input* input){
       Serial.print(" changed to " );
       Serial.println(input->debouncer.getState());
       Serial.print("Sensitivity: ");
-      Serial.println(input->analog_value);
+      Serial.print(input->analog_value);
+      Serial.print("  Raw: ");
+      Serial.print(raw_val);
+      Serial.println();
     }
 
 		return input->debouncer.getState();
 	}
 
 	return input->is_on;
+}
+
+int sensor_input_raw_value(struct sensor_input* input){
+  int val;
+
+  if(input->gpio > 0){
+    if(input->flags & FLAG_USE_ANALOG){
+      val = analogRead(gpioToAnalog(input->gpio));
+    }else{
+      val = digitalRead(input->gpio);
+    }
+    return val;
+  }else{
+    return -1;
+  }
 }
 
 void sensor_input_handle_event(struct sensor_input* input, uint64_t event_id){

@@ -21,6 +21,8 @@ struct sensor_input_eeprom{
   uint16_t analog_value;
   uint64_t event_id_on;
   uint64_t event_id_off;
+  uint16_t debounce_on;
+  uint16_t debounce_off;
 };
 
 struct switch_input_eeprom{
@@ -37,6 +39,8 @@ struct sensor_input{
 	uint8_t flags;
   uint16_t analog_value;
   Button debouncer;
+  uint16_t debounce_on;
+  uint16_t debounce_off;
 
 	// If using event IDs:
 	uint64_t event_id_on;
@@ -81,12 +85,20 @@ struct route{
 	struct sensor_input inputs[4];
 	struct switch_input switch_inputs[8];
   struct train current_train;
+  unsigned long time_cleared_ms;
 };
 
 /**
  * Determine the current value of the sensor input.  Value will be either 0(for inactive) or 1(for active)
  */
 int sensor_input_value(struct sensor_input* input);
+
+/**
+ * Get the raw value of the input(0 or 1 for digital, 0 to max for analog GPIO),
+ * -1 if this sensor input is not going to a GPIO.
+ * Does NOT take polarity into account.
+ */
+int sensor_input_raw_value(struct sensor_input* input);
 
 /**
  * For the given sensor input, notify that input that an event ID has come in.

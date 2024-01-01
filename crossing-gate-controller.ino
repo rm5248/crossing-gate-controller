@@ -1,5 +1,5 @@
 #include <ACAN2515.h>
-#include <m95_eeprom.h>
+#include <M95_EEPROM.h>
 #include <lcc.h>
 #include <lcc-common-internal.h>
 #include <lcc-datagram.h>
@@ -106,7 +106,15 @@ const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
 <name>Event Id OFF</name> \
 <description>If not using GPIO, event ID to indicate that this sensor is off</description> \
 </eventid> \
-<group offset='42'/> \
+<int size='2'> \
+<name>Debounce ON time</name> \
+<description>The time(in milliseconds) for a debounce delay when activated</description> \
+</int> \
+<int size='2'> \
+<name>Debounce OFF time</name> \
+<description>The time(in milliseconds) for a debounce delay when deactivated</description> \
+</int> \
+<group offset='38'/> \
 </group> \
 <!-- Switch inputs --> \
 <group replication='8'> \
@@ -197,6 +205,16 @@ const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
 <max>1000</max> \
 <default>250</default> \
 </int> \
+</segment> \
+<segment space='250'> \
+<!-- 8 routes x 4 inputs = 24 values --> \
+<name>Input Values</name> \
+<group replication='24'> \
+<int size='2'> \
+<name>Input</name> \
+<description>Raw value of GPIO</description> \
+</int> \
+</group> \
 </segment> \
 </cdi>" };
 
@@ -327,6 +345,12 @@ void handle_gate_flash(){
 }
 
 void handle_route_ltr(struct route* route, int left_input, int left_island_input, int right_island_input, int right_input){
+  unsigned long time_since_last_change = millis() - route->current_train.last_seen_millis;
+  if(time_since_last_change < 500){
+    // Debounce how fast we change state
+    return;
+  }
+
   if(left_island_input == 1 && 
     route->current_train.location == LOCATION_PRE_ISLAND_OCCUPIED){
     route->current_train.location = LOCATION_ISLAND_OCCUPIED_INCOMING;
@@ -352,10 +376,17 @@ void handle_route_ltr(struct route* route, int left_input, int left_island_input
     Serial.println(F("train out LTR"));
     route->current_train.location = LOCATION_UNOCCUPIED;
     route->current_train.direction = DIRECTION_UNKNOWN;
+    route->time_cleared_ms = millis();
   }
 }
 
 void handle_route_rtl(struct route* route, int left_input, int left_island_input, int right_island_input, int right_input){
+  unsigned long time_since_last_change = millis() - route->current_train.last_seen_millis;
+  if(time_since_last_change < 500){
+    // Debounce how fast we change state
+    return;
+  }
+
   if(right_island_input == 1 && 
     route->current_train.location == LOCATION_PRE_ISLAND_OCCUPIED){
     route->current_train.location = LOCATION_ISLAND_OCCUPIED_INCOMING;
@@ -381,12 +412,13 @@ void handle_route_rtl(struct route* route, int left_input, int left_island_input
     Serial.println(F("train out RTL"));
     route->current_train.location = LOCATION_UNOCCUPIED;
     route->current_train.direction = DIRECTION_UNKNOWN;
+    route->time_cleared_ms = millis();
   }
 }
 
 void handle_single_route(struct route* route){
   for(int x = 0; x < 4; x++){
-    if(!sensor_input_valid(&route->inputs[0])){
+    if(!sensor_input_valid(&route->inputs[x])){
       return;
     }
   }
@@ -396,10 +428,12 @@ void handle_single_route(struct route* route){
   int right_island_input = sensor_input_value(&route->inputs[2]);
   int right_input = sensor_input_value(&route->inputs[3]);
   unsigned long millis_diff = millis() - route->current_train.last_seen_millis;
+  unsigned long time_since_route_clear = millis() - route->time_cleared_ms;
 
   // First check to see if this is a new train coming into the route
   if((left_input || right_input) &&
-    route->current_train.location == LOCATION_UNOCCUPIED){
+    route->current_train.location == LOCATION_UNOCCUPIED &&
+    time_since_route_clear >= 2000){
       // There is a new train coming into the route.
       // Let's see if this route is valid or not
       for(int x = 0; x < sizeof(route->switch_inputs) / sizeof(route->switch_inputs[0]); x++){
@@ -437,6 +471,7 @@ void handle_single_route(struct route* route){
     Serial.println(F("timeout"));
     route->current_train.location = LOCATION_UNOCCUPIED;
     route->current_train.direction = DIRECTION_UNKNOWN;
+    route->time_cleared_ms = millis();
   }
 }
 
@@ -543,13 +578,21 @@ static void load_from_eeprom(){
       if(sensor_eeprom.polarity){
         crossing_routes[x].inputs[sensor_input].flags |= FLAG_POLARITY_ACTIVE_LOW;
       }
+      crossing_routes[x].inputs[sensor_input].debounce_on = __builtin_bswap16(sensor_eeprom.debounce_on);
+      crossing_routes[x].inputs[sensor_input].debounce_off = __builtin_bswap16(sensor_eeprom.debounce_off);
       crossing_routes[x].inputs[sensor_input].debouncer = Button();
-      crossing_routes[x].inputs[sensor_input].debouncer.setPushDebounceInterval(100);
+      crossing_routes[x].inputs[sensor_input].debouncer.setPushDebounceInterval(crossing_routes[x].inputs[sensor_input].debounce_on);
+      crossing_routes[x].inputs[sensor_input].debouncer.setReleaseDebounceInterval(crossing_routes[x].inputs[sensor_input].debounce_off);
 
       if(sensor_eeprom.gpio_number){
         pinMode(sensor_eeprom.gpio_number, INPUT);
         Serial.print("Sensor GPIO number ");
         Serial.println(sensor_eeprom.gpio_number);
+        Serial.print("Debounce times: ");
+        Serial.print(crossing_routes[x].inputs[sensor_input].debouncer.getPushDebounceInterval());
+        Serial.print(",");
+        Serial.print(crossing_routes[x].inputs[sensor_input].debounce_off);
+        Serial.println();
       }
 
       eeprom_offset += 64;
@@ -572,6 +615,27 @@ static void load_from_eeprom(){
   }
 }
 
+void handleDebugRead(uint8_t* buffer, int starting_address, int count){
+  struct sensor_input* all_inputs[32];
+  int i = 0;
+  for(int x = 0; x < NUM_ROUTES; x++){
+    for(int y = 0; y < 4; y++){
+      all_inputs[i] = &(crossing_routes[x].inputs[y]);
+      i++;
+    }
+  }
+
+  i = 0;
+  for(int starting = starting_address / 2; 
+    starting < (starting_address + (count/2)); 
+    starting++){
+    uint16_t* buff_u16 = (uint16_t*)buffer;
+    buff_u16[i] = sensor_input_raw_value(all_inputs[starting]);
+    buff_u16[i] = __builtin_bswap16(buff_u16[i]);
+    i++;
+  }
+}
+
 //
 // Memory read/write
 //
@@ -582,6 +646,9 @@ void mem_address_space_information_query(struct lcc_memory_context* ctx, uint16_
   }else if(address_space == 253){
     // basic config space
     lcc_memory_respond_information_query(ctx, alias, 1, address_space, MAX_MEMORY_BYTES, 0, 0);
+  }else if(address_space == 250){
+    // Memory space for the raw IO values
+    lcc_memory_respond_information_query(ctx, alias, 1, address_space, 2 * 24, 0, 0);
   }else{
     // This memory space does not exist: return an error
     lcc_memory_respond_information_query(ctx, alias, 0, address_space, 0, 0, 0);
@@ -620,6 +687,17 @@ void mem_address_space_read(struct lcc_memory_context* ctx, uint16_t alias, uint
 
     uint8_t buffer[64];
     eeprom.read(starting_address, read_count, buffer);
+
+    lcc_memory_respond_read_reply_ok(ctx, alias, address_space, starting_address, buffer, read_count);
+  }else if(address_space == 250){
+    if((starting_address + read_count) > (2 * 24)){
+      lcc_memory_respond_read_reply_fail(ctx, alias, address_space, 0, 0, NULL);
+      return;
+    }
+
+    uint8_t buffer[64];
+    memset(buffer, 0, sizeof(buffer));
+    handleDebugRead(buffer, starting_address, read_count);
 
     lcc_memory_respond_read_reply_ok(ctx, alias, address_space, starting_address, buffer, read_count);
   }else{

@@ -77,7 +77,15 @@
 					<name>Event Id OFF</name>
 					<description>If not using GPIO, event ID to indicate that this sensor is off</description>
 				</eventid>
-				<group offset='42'/>
+				<int size='2'>
+					<name>Debounce ON time</name>
+					<description>The time(in milliseconds) for a debounce delay when activated</description>
+				</int>
+				<int size='2'>
+					<name>Debounce OFF time</name>
+					<description>The time(in milliseconds) for a debounce delay when deactivated</description>
+				</int>
+				<group offset='38'/>
 			</group>
 			
 			<!-- Switch inputs -->
@@ -177,5 +185,16 @@
 			<max>1000</max>
 			<default>250</default>
 		</int>
+	</segment>
+
+	<segment space='250'>
+		<!-- 8 routes x 4 inputs = 24 values -->
+		<name>Input Values</name>
+		<group replication='24'>
+			<int size='2'>
+				<name>Input</name>
+				<description>Raw value of GPIO</description>
+			</int>
+		</group>
 	</segment>
 </cdi>
