@@ -5,6 +5,7 @@
 #include <lcc-datagram.h>
 #include <lcc-event.h>
 #include <lcc-memory.h>
+#include <avr/wdt.h>
 
 #include "crossing-gate-structs.h"
 
@@ -733,6 +734,19 @@ void mem_address_space_write(struct lcc_memory_context* ctx, uint16_t alias, uin
   }
 }
 
+static void reboot_fn(struct lcc_memory_context* ctx){
+  Serial.println("Reboot");
+  wdt_disable();
+  wdt_enable(WDTO_15MS);
+  while (1) {}
+}
+
+static void factory_reset(struct lcc_memory_context* ctx){
+  Serial.println("Factory reset");
+  write_defaults_to_eeprom();
+  load_from_eeprom();
+}
+
 static void can_isr(){
   can.isr();
 }
@@ -816,6 +830,9 @@ void setup () {
     mem_address_space_information_query,
     mem_address_space_read,
     mem_address_space_write);
+
+  lcc_memory_set_reboot_function(mem_ctx, reboot_fn);
+  lcc_memory_set_factory_reset_function(mem_ctx, factory_reset);
 
   uint64_t event_id = unique_id << 16;
   lcc_event_add_event_produced(evt_ctx, event_id);
