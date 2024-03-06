@@ -322,13 +322,16 @@ void handle_gate_flash(){
     gate_flash = expectedGateFlashState;
 
     if(gate_flash == FLASH_ON){
+      Serial.println("Flash on");
       digitalWrite(general_config.gate_gpio1, 1);
       digitalWrite(general_config.gate_gpio2, 1);
+      digitalWrite(48, 1);
     }else{
       digitalWrite(general_config.gate_gpio1, 0);
       digitalWrite(general_config.gate_gpio2, 0);
       digitalWrite(general_config.led_gpio1, 0);
       digitalWrite(general_config.led_gpio2, 0);
+      digitalWrite(48, 0);
     }
   }
 
@@ -760,6 +763,8 @@ void setup () {
 
   Serial.println("Crossing gate controller starting up");
 
+  pinMode(48, OUTPUT);
+
   PAUSE("press any key to start");
 
   SPI.begin();
@@ -782,6 +787,8 @@ void setup () {
   display_freeram();
 
   PAUSE("press any key to read ID page");
+
+  digitalRead(A0);
 
   unique_id = 0;
   eeprom.read_id_page(8, &unique_id);
