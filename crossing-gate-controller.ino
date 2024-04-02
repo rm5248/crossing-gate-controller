@@ -8,6 +8,7 @@
 #include <avr/wdt.h>
 
 #include "crossing-gate-structs.h"
+#include "crossing-cdi.h"
 
 #if 0
 #define PAUSE(x) do{Serial.println(x); \
@@ -30,195 +31,6 @@
 static const uint32_t GENERAL_CONFIG_LOCATION = 0x2000;
 static const uint32_t SPACE_251_LOCATION = 0x3000;
 
-const char cdi[] PROGMEM = { "<?xml version='1.0'?> \
-<cdi xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xsi:noNamespaceSchemaLocation='http://openlcb.org/schema/cdi/1/1/cdi.xsd'> \
-<identification> \
-<manufacturer>Snowball Creek</manufacturer> \
-<model>Crossing Gate Controller</model> \
-<hardwareVersion>1.0</hardwareVersion> \
-<softwareVersion>0.1</softwareVersion> \
-</identification> \
-<acdi/> \
-<segment space='251'> \
-<name>Node ID</name> \
-<group> \
-<name>Your name and description for this node</name> \
-<string size='63'> \
-<name>Node Name</name> \
-</string> \
-<string size='64' offset='1'> \
-<name>Node Description</name> \
-</string> \
-</group> \
-</segment> \
-<segment space='253'> \
-<name>Routes</name> \
-<group replication='8'> \
-<name>Route</name> \
-<repname>Route</repname> \
-<group replication='4'> \
-<name>Sensor Inputs</name> \
-<repname>Sensor Inputs</repname> \
-<int size='1'> \
-<name>GPIO Number</name> \
-<description>GPIO number to use as input to this sensor on this route.  Set to 0 to disable and use EventIDs.</description> \
-</int> \
-<int size='1'> \
-<name>GPIO Type</name> \
-<description>GPIO Type(analog or normal)</description> \
-<map> \
-<relation> \
-<property>0</property> \
-<value>GPIO</value> \
-</relation> \
-<relation> \
-<property>1</property> \
-<value>Analog GPIO</value> \
-</relation> \
-</map> \
-</int> \
-<int size='1'> \
-<name>Polarity</name> \
-<description>GPIO polarity</description> \
-<map> \
-<relation> \
-<property>0</property> \
-<value>High</value> \
-</relation> \
-<relation> \
-<property>1</property> \
-<value>Low</value> \
-</relation> \
-</map> \
-</int> \
-<!-- 1 byte padding here --> \
-<int size='2' offset='1'> \
-<name>Analog Value</name> \
-<description>If using an analog pin, values above this will be 'on'</description> \
-<min>0</min> \
-<max>1023</max> \
-<default>250</default> \
-</int> \
-<eventid> \
-<name>Event Id ON</name> \
-<description>If not using GPIO, event ID to indicate that this sensor is on</description> \
-</eventid> \
-<eventid> \
-<name>Event Id OFF</name> \
-<description>If not using GPIO, event ID to indicate that this sensor is off</description> \
-</eventid> \
-<int size='2'> \
-<name>Debounce ON time</name> \
-<description>The time(in milliseconds) for a debounce delay when activated</description> \
-</int> \
-<int size='2'> \
-<name>Debounce OFF time</name> \
-<description>The time(in milliseconds) for a debounce delay when deactivated</description> \
-</int> \
-<group offset='38'/> \
-</group> \
-<!-- Switch inputs --> \
-<group replication='8'> \
-<name>Switch Inputs</name> \
-<repname>Switch Input</repname> \
-<int size='1'> \
-<name>GPIO Number</name> \
-<description>GPIO number to use as input to this sensor on this route.  Set to 0 to disable and use EventIDs.</description> \
-</int> \
-<int size='1'> \
-<name>Polarity</name> \
-<description>GPIO polarity</description> \
-<map> \
-<relation> \
-<property>0</property> \
-<value>High</value> \
-</relation> \
-<relation> \
-<property>1</property> \
-<value>Low</value> \
-</relation> \
-</map> \
-</int> \
-<int size='1'> \
-<name>Route Posistion</name> \
-<description>The posistion this switch needs to be in for this route to be valid</description> \
-<map> \
-<relation> \
-<property>0</property> \
-<value>Normal</value> \
-</relation> \
-<relation> \
-<property>1</property> \
-<value>Reverse</value> \
-</relation> \
-</map> \
-</int> \
-<eventid> \
-<name>Event Id Normal</name> \
-<description>If not using GPIO, event ID to indicate that this switch is normal</description> \
-</eventid> \
-<eventid> \
-<name>Event Id Reverse</name> \
-<description>If not using GPIO, event ID to indicate that this switch is reversed</description> \
-</eventid> \
-<group offset='45'/> \
-</group> \
-</group> \
-</segment> \
-<segment space='253' origin='8192'> \
-<name>General Config</name> \
-<!-- invisible EEPROM version here --> \
-<int size='1' offset='1'> \
-<name>Timeout</name> \
-<description>Timeout value for system to reset and become 'inactive'.  This value is in seconds</description> \
-<min>0</min> \
-<max>120</max> \
-<default>25</default> \
-</int> \
-<int size='1'> \
-<name>Gate output</name> \
-<description>GPIO to turn ON when gates should be down</description> \
-<min>0</min> \
-<max>100</max> \
-</int> \
-<int size='1'> \
-<name>Gate output 2</name> \
-<description>GPIO to turn ON when gates should be down</description> \
-<min>0</min> \
-<max>100</max> \
-</int> \
-<int size='1'> \
-<name>LED GPIO 1</name> \
-<description>GPIO to turn ON to toggle LED 1 on the crossing</description> \
-<min>0</min> \
-<max>100</max> \
-</int> \
-<int size='1'> \
-<name>LED GPIO 2</name> \
-<description>GPIO to turn ON to toggle LED 2 on the crossing</description> \
-<min>0</min> \
-<max>100</max> \
-</int> \
-<int size='2'> \
-<name>LED Flash Time</name> \
-<description>How long for each LED on the crossing to flash in milliseconds</description> \
-<min>0</min> \
-<max>1000</max> \
-<default>250</default> \
-</int> \
-</segment> \
-<segment space='250'> \
-<!-- 8 routes x 4 inputs = 24 values --> \
-<name>Input Values</name> \
-<group replication='24'> \
-<int size='2'> \
-<name>Input</name> \
-<description>Raw value of GPIO</description> \
-</int> \
-</group> \
-</segment> \
-</cdi>" };
-
 static const byte MCP2515_CS  = 8 ; // CS input of MCP2515 (adapt to your design) 
 static const byte MCP2515_INT =  2 ; // INT output of MCP2515 (adapt to your design)
 static const byte EEPROM_CS = 7;
@@ -238,9 +50,23 @@ static uint32_t gBlinkLedDate = 0 ;
 static uint32_t blink_crossing_led_time = 0 ;
 static uint64_t unique_id;
 
+struct bell_info{
+  int ringing = 0;
+  int use_ring_off_time = 0;
+  uint32_t ring_off_time = 0;
+}bell_info;
+
 enum GateFlashState{
   FLASH_OFF,
   FLASH_ON,
+};
+
+enum BellRingType{
+  BELL_RING_NONE = 0,
+  BELL_RING_LOWER,
+  BELL_RING_RAISE,
+  BELL_RING_LOWER_AND_RAISE,
+  BELL_RING_WHILE_FLASH,
 };
 
 enum GateFlashState gate_flash;
@@ -258,6 +84,9 @@ struct general_config{
   uint8_t led_gpio1;
   uint8_t led_gpio2;
   uint16_t led_flash_time;
+  uint8_t bell_gpio;
+  uint8_t bell_behavior;
+  uint16_t bell_ring_time;
 } general_config;
 
 void display_freeram() {
@@ -325,13 +154,46 @@ void handle_gate_flash(){
       Serial.println("Flash on");
       digitalWrite(general_config.gate_gpio1, 1);
       digitalWrite(general_config.gate_gpio2, 1);
-      digitalWrite(48, 1);
+
+      if(general_config.bell_behavior == BELL_RING_LOWER ||
+        general_config.bell_behavior == BELL_RING_LOWER_AND_RAISE ||
+        general_config.bell_behavior == BELL_RING_WHILE_FLASH){
+          Serial.println("Gates lowring, turning on BELL");
+          Serial.print("BELL: ");
+          Serial.println(general_config.bell_behavior);
+          // The gates are going down!
+          digitalWrite(general_config.bell_gpio, 1); 
+          bell_info.ringing = 1;
+          if(general_config.bell_behavior == BELL_RING_WHILE_FLASH){
+            bell_info.use_ring_off_time = 0;
+          }else{
+            bell_info.use_ring_off_time = 1;
+          }
+          bell_info.ring_off_time = millis() + general_config.bell_ring_time;
+          Serial.print("use ring off: ");
+          Serial.print(bell_info.use_ring_off_time);
+          Serial.print("  now: ");
+          Serial.print(millis());
+          Serial.print(" time off: ");
+          Serial.print(bell_info.ring_off_time);
+          Serial.println();
+      }
     }else{
       digitalWrite(general_config.gate_gpio1, 0);
       digitalWrite(general_config.gate_gpio2, 0);
       digitalWrite(general_config.led_gpio1, 0);
       digitalWrite(general_config.led_gpio2, 0);
-      digitalWrite(48, 0);
+      if(general_config.bell_behavior == BELL_RING_RAISE ||
+        general_config.bell_behavior == BELL_RING_LOWER_AND_RAISE){
+          // The gates are going up!
+          digitalWrite(general_config.bell_gpio, 1); 
+          bell_info.ringing = 1;
+          bell_info.use_ring_off_time = 1;
+          bell_info.ring_off_time = millis() + general_config.bell_ring_time;
+      }else if(general_config.bell_behavior == BELL_RING_WHILE_FLASH){
+        digitalWrite(general_config.bell_gpio, 0);
+        bell_info.ringing = 0;
+      }
     }
   }
 
@@ -487,10 +349,12 @@ static void write_defaults_to_eeprom(){
   general_config.eeprom_version = 1;
   general_config.timeout_seconds = 25;
   general_config.led_flash_time = __builtin_bswap16(250);
+  general_config.bell_ring_time = __builtin_bswap16(2500);
 
   eeprom.write(GENERAL_CONFIG_LOCATION, sizeof(general_config), &general_config);
 
   general_config.led_flash_time = 250;
+  general_config.bell_ring_time = 2500;
 
   for(int x = 0; x < NUM_ROUTES; x++){
     for(int sensor_input = 0; sensor_input < 4; sensor_input++){
@@ -545,6 +409,8 @@ static void load_general_config(){
 
   Serial.print("Timeout seconds: ");
   Serial.println(general_config.timeout_seconds);
+
+  general_config.bell_ring_time = __builtin_bswap16(general_config.bell_ring_time);
 }
 
 static void load_from_eeprom(){
@@ -928,5 +794,13 @@ void loop() {
     Serial.println("Reload settings from EEPROM");
     load_from_eeprom();
     reload_when = 0;
+  }
+
+  if(bell_info.ringing && bell_info.use_ring_off_time && (millis() >= bell_info.ring_off_time)){
+    Serial.println("Turning bell OFF");
+    bell_info.ringing = 0;
+    bell_info.use_ring_off_time = 0;
+    bell_info.ring_off_time = 0;
+    digitalWrite(general_config.bell_gpio, 0);
   }
 }
